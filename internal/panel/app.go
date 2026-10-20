@@ -44,6 +44,7 @@ type App struct {
 	CA *tlsutil.LocalCA // set by main when the panel serves its own certificate (tls=auto)
 
 	webCur atomic.Pointer[webState] // UI being served: built-in, or a newer downloaded bundle
+	demo   *demoMapper              // WHARF_DEMO=1: anonymise API output for screenshots
 }
 
 func NewApp(cfg Config, db *sql.DB, web fs.FS) *App {
@@ -55,6 +56,7 @@ func NewApp(cfg Config, db *sql.DB, web fs.FS) *App {
 		blockedLog: newLimiter(1, time.Minute),
 		geo:        NewGeo(cfg.Path("geo")),
 		pve:        pveCache{kick: make(chan struct{}, 1)},
+		demo:       newDemoMapper(),
 	}
 	if m, err := rules.Default(cfg.Path("rules.json.gz")); err == nil {
 		a.rules = m

@@ -31,3 +31,8 @@ scripts/build-ipk.sh x86_64
 
 The UI is Simplified Chinese today. An i18n layer and an English translation are very welcome — please open an issue first so we can agree on the approach.
 界面目前是简体中文，欢迎贡献多语言支持，动手前请先开 Issue 讨论方案。
+
+## Screenshots · 截图
+
+`WHARF_DEMO=1 owp-panel -config …` anonymises every API response (device / person names, LAN and WAN addresses, MACs), so a real, busy panel can be photographed for docs. Add your own secrets to scrub with `WHARF_DEMO_SCRUB='secret=>replacement;…'`. There is no UI switch for this. Run it only on a local copy.
+`WHARF_DEMO=1` 会把接口输出全部匿名化（设备名、人名、内外网地址、MAC），用于给文档截图；只在本地副本上使用。

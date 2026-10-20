@@ -123,7 +123,7 @@ func (a *App) Routes() http.Handler {
 
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { jsonErr(w, 404, "not found") })
 	m.HandleFunc("/", a.handleStatic)
-	return a.securityHeaders(a.accessGate(m))
+	return a.securityHeaders(a.accessGate(a.demoWrap(m)))
 }
 
 func (a *App) securityHeaders(h http.Handler) http.Handler {
