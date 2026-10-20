@@ -1,0 +1,121 @@
+#!/bin/sh /etc/rc.common
+# OWP: owp-agent (router API) + owp-panel (multi-admin web panel)
+
+START=99
+STOP=10
+USE_PROCD=1
+
+AGENT=/usr/bin/owp-agent
+PANEL=/usr/bin/owp-panel
+PANEL_CONF=/var/etc/owp/panel.json
+
+json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+json_list() {
+	local out="" i
+	for i in $1; do out="$out${out:+,}\"$(json_str "$i")\""; done
+	printf '[%s]' "$out"
+}
+
+ensure_key() {
+	[ -n "$(uci -q get owp.agent.secret)" ] && return
+	eval "$($AGENT genkey)"
+	uci set owp.agent.key_id="$key_id"
+	uci set owp.agent.secret="$secret"
+	uci commit owp
+}
+
+# keep a named firewall rule in sync: sync_rule <name> <enabled> <port> [src_ips]
+sync_rule() {
+	local name="$1" on="$2" port="$3" src="$4" ip changed=0
+	if [ "$on" != "1" ]; then
+		uci -q get firewall."$name" >/dev/null || return 1
+		uci delete firewall."$name"
+		return 0
+	fi
+	local want="wan|tcp|$port|$src"
+	local have="$(uci -q get firewall."$name".src)|$(uci -q get firewall."$name".proto)|$(uci -q get firewall."$name".dest_port)|$(uci -q get firewall."$name".src_ip | tr '\n' ' ' | sed 's/ $//')"
+	[ "$want" = "$have" ] && return 1
+	uci -q delete firewall."$name"
+	uci set firewall."$name"=rule
+	uci set firewall."$name".name="$name"
+	uci set firewall."$name".src=wan
+	uci set firewall."$name".proto=tcp
+	uci set firewall."$name".dest_port="$port"
+	uci set firewall."$name".target=ACCEPT
+	for ip in $src; do uci add_list firewall."$name".src_ip="$ip"; done
+	return 0
+}
+
+sync_firewall() {
+	local reload=0 port
+	port="$(uci -q get owp.panel.port)"
+	sync_rule owp_panel "$( [ "$(uci -q get owp.panel.enabled)" = 1 ] && uci -q get owp.panel.open_wan)" "${port:-7080}" && reload=1
+	port="$(uci -q get owp.agent.listen)"; port="${port##*:}"
+	sync_rule owp_agent "$( [ "$(uci -q get owp.agent.enabled)" = 1 ] && uci -q get owp.agent.open_wan)" "${port:-7071}" "$(uci -q get owp.agent.allow_from)" && reload=1
+	if [ "$reload" = 1 ]; then
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+
+write_panel_conf() {
+	local data="$1" port tls proxies agent_port
+	port="$(uci -q get owp.panel.port)"; tls="$(uci -q get owp.panel.tls)"
+	proxies="$(uci -q get owp.panel.trusted_proxies)"
+	agent_port="$(uci -q get owp.agent.listen)"; agent_port="${agent_port##*:}"
+	local scheme=http fp=""
+	if [ "$(uci -q get owp.agent.tls)" = 1 ]; then
+		scheme=https; fp="$($AGENT -data "$data" fingerprint 2>/dev/null)"
+	fi
+	mkdir -p "${PANEL_CONF%/*}"
+	umask 077
+	cat > "$PANEL_CONF" <<-JSON
+	{
+	  "listen": ":${port:-7080}",
+	  "tls": "${tls:-auto}",
+	  "data_dir": "$(json_str "$data/panel")",
+	  "trusted_proxies": $(json_list "$proxies"),
+	  "agent": {
+	    "url": "$scheme://127.0.0.1:${agent_port:-7071}",
+	    "key_id": "$(json_str "$(uci -q get owp.agent.key_id)")",
+	    "secret": "$(json_str "$(uci -q get owp.agent.secret)")",
+	    "fingerprint": "$fp"
+	  }
+	}
+	JSON
+}
+
+start_service() {
+	local data
+	data="$(uci -q get owp.main.data_dir)"; data="${data:-/etc/owp}"
+	mkdir -p "$data" && chmod 700 "$data"
+	ensure_key
+	sync_firewall
+
+	if [ "$(uci -q get owp.agent.enabled)" = 1 ]; then
+		procd_open_instance agent
+		procd_set_param command $AGENT -data "$data"
+		procd_set_param respawn 3600 5 0
+		procd_set_param stdout 1
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+	if [ "$(uci -q get owp.panel.enabled)" = 1 ]; then
+		write_panel_conf "$data"
+		procd_open_instance panel
+		procd_set_param command $PANEL -config "$PANEL_CONF"
+		procd_set_param respawn 3600 5 0
+		procd_set_param stdout 1
+		procd_set_param stderr 1
+		procd_close_instance
+	fi
+}
+
+stop_service() {
+	return 0
+}
+
+service_triggers() {
+	procd_add_reload_trigger owp
+}

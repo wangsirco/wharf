@@ -1,0 +1,23 @@
+
+config main 'main'
+	option data_dir '/etc/owp'
+
+config agent 'agent'
+	option enabled '1'
+	# 127.0.0.1:7071 = only the local panel; 0.0.0.0:7071 = also remote (VPS) panels
+	option listen '127.0.0.1:7071'
+	option key_id ''
+	option secret ''
+	option tls '0'
+	# remote panel source IPs/CIDRs allowed (space separated); also opened on WAN when open_wan=1
+	option allow_from ''
+	option open_wan '0'
+
+config panel 'panel'
+	option enabled '1'
+	option port '7080'
+	# auto = self-signed HTTPS, off = plain HTTP (only behind a TLS reverse proxy)
+	option tls 'auto'
+	option open_wan '0'
+	# reverse proxies / CDN ranges whose X-Forwarded-For is trusted (space separated)
+	option trusted_proxies ''

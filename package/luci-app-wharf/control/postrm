@@ -1,0 +1,41 @@
+#!/bin/sh
+[ -n "$IPKG_INSTROOT" ] && exit 0
+# opkg runs postrm on upgrades too; only clean up when the package is really gone
+[ -x /usr/bin/owp-agent ] && exit 0
+changed=0
+for r in owp_panel owp_agent; do
+	uci -q get firewall.$r >/dev/null && uci delete firewall.$r && changed=1
+done
+[ "$changed" = 1 ] && uci commit firewall && /etc/init.d/firewall reload >/dev/null 2>&1
+# traffic accounting hook
+iptables -w -D FORWARD -j owp_acct 2>/dev/null
+iptables -w -F owp_acct 2>/dev/null; iptables -w -X owp_acct 2>/dev/null
+ipset destroy owp_up 2>/dev/null; ipset destroy owp_dn 2>/dev/null
+# device policies
+iptables -w -D FORWARD -j owp_pol 2>/dev/null; iptables -w -F owp_pol 2>/dev/null; iptables -w -X owp_pol 2>/dev/null
+iptables -w -D INPUT -j owp_polin 2>/dev/null; iptables -w -F owp_polin 2>/dev/null; iptables -w -X owp_polin 2>/dev/null
+iptables -w -t nat -D PREROUTING -j owp_dns 2>/dev/null; iptables -w -t nat -F owp_dns 2>/dev/null; iptables -w -t nat -X owp_dns 2>/dev/null
+for s in $(ipset list -n 2>/dev/null | grep -E "^owp_p[bw]_|^owp_captive$"); do ipset destroy "$s" 2>/dev/null; done
+# dnsmasq query log enabled by the agent
+for s in $(uci -q show dhcp | sed -n "s/^dhcp\.\([^.]*\)\.logfacility='\/var\/log\/owp-dns.log'$/\1/p"); do
+	uci -q delete dhcp.$s.logfacility; uci -q delete dhcp.$s.logqueries
+	uci commit dhcp && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+done
+rm -f /var/log/owp-dns.log
+rm -f /etc/sysctl.d/90-wharf.conf
+# components installed from the panel (and only those): remove them once this opkg run has finished,
+# keeping any that another installed package has come to depend on
+if [ -s /etc/wharf-deps.list ]; then
+	pkgs="$(grep -v '^#' /etc/wharf-deps.list)"
+	(
+		i=0; while pidof opkg >/dev/null 2>&1 && [ $i -lt 300 ]; do sleep 1; i=$((i+1)); done
+		for p in $pkgs; do
+			opkg whatdepends "$p" 2>/dev/null | grep -q "depends on" && { logger -t wharf "keep $p: still needed by another package"; continue; }
+			opkg remove --autoremove "$p" >/dev/null 2>&1 && logger -t wharf "removed $p (installed by the panel)"
+		done
+		rm -f /etc/wharf-deps.list
+	) </dev/null >/dev/null 2>&1 &
+fi
+rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache 2>/dev/null
+/etc/init.d/rpcd reload 2>/dev/null
+exit 0

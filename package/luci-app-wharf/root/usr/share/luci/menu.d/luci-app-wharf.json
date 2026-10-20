@@ -1,0 +1,14 @@
+{
+	"admin/services/owp": {
+		"title": "Wharf 码头",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "owp/main"
+		},
+		"depends": {
+			"acl": [ "luci-app-wharf" ],
+			"uci": { "owp": true }
+		}
+	}
+}

@@ -1,0 +1,16 @@
+# build output
+/dist/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+wharf-release
+
+# private: router backups, real incident data, drafts, local tooling
+/backups/
+/docs/incidents/
+/docs/blog/
+/.claude/
+.DS_Store
+*.key
+*.pem
+.env

@@ -1,0 +1,66 @@
+#!/bin/sh
+# rpcd backend for the LuCI OWP page.
+. /usr/share/libubox/jshn.sh
+
+data_dir() { local d; d="$(uci -q get owp.main.data_dir)"; echo "${d:-/etc/owp}"; }
+
+running() {
+	ubus call service list '{"name":"owp"}' 2>/dev/null | jsonfilter -e "@.owp.instances.$1.running" 2>/dev/null
+}
+
+case "$1" in
+list)
+	echo '{ "status": {}, "genkey": {}, "reset_super": {}, "reset_access": {}, "clear_initial": {} }'
+	;;
+call)
+	case "$2" in
+	status)
+		d="$(data_dir)"
+		json_init
+		json_add_boolean agent_running "$( [ "$(running agent)" = true ] && echo 1 || echo 0)"
+		json_add_boolean panel_running "$( [ "$(running panel)" = true ] && echo 1 || echo 0)"
+		json_add_string version "$(opkg list-installed luci-app-wharf 2>/dev/null | awk '{print $3}')"
+		json_add_string data_dir "$d"
+		json_add_string data_usage "$(du -sh "$d" 2>/dev/null | awk '{print $1}')"
+		json_add_string lan_ip "$(uci -q get network.lan.ipaddr)"
+		json_add_string wan_ip "$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address')"
+		if [ -f "$d/panel/initial_password" ]; then
+			json_add_string initial_user "$(sed -n 1p "$d/panel/initial_password")"
+			json_add_string initial_password "$(sed -n 2p "$d/panel/initial_password")"
+		fi
+		if [ "$(uci -q get owp.agent.tls)" = 1 ]; then
+			json_add_string agent_fingerprint "$(/usr/bin/owp-agent -data "$d" fingerprint 2>/dev/null)"
+		fi
+		json_dump
+		;;
+	genkey)
+		eval "$(/usr/bin/owp-agent genkey)"
+		uci set owp.agent.key_id="$key_id"
+		uci set owp.agent.secret="$secret"
+		uci commit owp
+		/etc/init.d/owp restart >/dev/null 2>&1
+		json_init
+		json_add_string key_id "$key_id"
+		json_add_string secret "$secret"
+		json_dump
+		;;
+	reset_super)
+		pw="$(/usr/bin/owp-panel -config /var/etc/owp/panel.json reset-super 2>/dev/null)"
+		json_init
+		json_add_boolean ok "$( [ -n "$pw" ] && echo 1 || echo 0)"
+		json_add_string password "$pw"
+		json_dump
+		;;
+	reset_access)
+		out="$(/usr/bin/owp-panel -config /var/etc/owp/panel.json reset-access 2>/dev/null)"
+		json_init
+		json_add_boolean ok "$( [ "$out" = ok ] && echo 1 || echo 0)"
+		json_dump
+		;;
+	clear_initial)
+		rm -f "$(data_dir)/panel/initial_password"
+		echo '{ "ok": true }'
+		;;
+	esac
+	;;
+esac

@@ -1,0 +1,13 @@
+{
+	"luci-app-wharf": {
+		"description": "Grant access to Wharf panel settings",
+		"read": {
+			"ubus": { "luci.owp": [ "status" ] },
+			"uci": [ "owp" ]
+		},
+		"write": {
+			"ubus": { "luci.owp": [ "genkey", "reset_super", "reset_access", "clear_initial" ] },
+			"uci": [ "owp" ]
+		}
+	}
+}
