@@ -54,7 +54,7 @@ Wharf 以 LuCI 插件形式安装在路由器上，只用 OpenWrt 原生机制�
 **系统要求**
 - OpenWrt 22.03 及以上。fw3 / iptables 已充分验证；fw4 / nftables 系统尚未测试。
 - 内存建议 512 MB 以上。
-- 支持的架构：`x86_64`、`aarch64`、`arm`（cortex-a7）、`mips` / `mipsel`（24kc）。
+- 支持的架构：`x86_64`、`aarch64`、`arm`（cortex-a7）。暂不支持 MIPS（内置 SQLite 不支持 32 位 MIPS，这类路由器内存通常也不够）。
 
 **步骤**
 1. 在[最新 Release](https://github.com/wangsirco/wharf/releases/latest) 下载 `luci-app-wharf_<版本>-1_<架构>.ipk`。

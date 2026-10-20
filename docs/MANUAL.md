@@ -2,7 +2,7 @@
 
 > 一个给全家人、多位管理员一起用的 OpenWrt 控制面板。不用懂 iptables，也能看清家里的网络、管好每一个端口。
 
-适用版本：0.16 及以上 · 适用系统：OpenWrt 22.03+ / iStoreOS（x86_64、aarch64、arm、mips）
+适用版本：0.16 及以上 · 适用系统：OpenWrt 22.03+ / iStoreOS（x86_64、aarch64、arm）
 
 ---
 
@@ -101,7 +101,7 @@ Wharf 的目标，就是把这些变成一个「家里人能看懂、管理员�
 
 - OpenWrt 22.03 或更新版本（fw3 / iptables 已充分验证；fw4 / nftables 系统可安装，但部分功能仍以 iptables 方式工作）。
 - 内存建议 ≥ 512 MB；面板数据库默认上限 1 GB，建议放在有足够空间的分区。
-- 架构：x86_64、aarch64、arm（cortex-a7）、mips / mipsel（24kc）。
+- 架构：x86_64、aarch64、arm（cortex-a7）。暂不支持 MIPS。
 
 ### 4.2 安装
 
@@ -559,7 +559,7 @@ docs/               手册、UI 组件说明、案例
 ```sh
 cd web && npm install && npm run build && cd ..
 go test ./internal/...
-scripts/build-ipk.sh x86_64      # 也支持 aarch64 / arm / mips / mipsel
+scripts/build-ipk.sh x86_64      # 也支持 aarch64 / arm
 ```
 
 - 版本号在 `internal/version/version.go`，构建脚本自动读取。

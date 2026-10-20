@@ -51,7 +51,7 @@ Wharf runs on the router itself as a LuCI package, uses only native OpenWrt mech
 
 ## Install
 
-Requirements: OpenWrt 22.03 or newer (fw3 / iptables is fully tested; fw4 / nftables systems are not yet tested), ≥ 512 MB RAM recommended. Architectures: `x86_64`, `aarch64`, `arm` (cortex-a7), `mips` / `mipsel` (24kc).
+Requirements: OpenWrt 22.03 or newer (fw3 / iptables is fully tested; fw4 / nftables systems are not yet tested), ≥ 512 MB RAM recommended. Architectures: `x86_64`, `aarch64`, `arm` (cortex-a7). MIPS routers are not supported (the embedded SQLite has no 32-bit MIPS port, and they rarely have the memory).
 
 1. Download `luci-app-wharf_<version>-1_<arch>.ipk` from the [latest release](https://github.com/wangsirco/wharf/releases/latest).
 2. Copy it to the router and install:
