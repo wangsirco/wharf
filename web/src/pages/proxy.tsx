@@ -46,7 +46,7 @@ interface Ext {
 interface Settings {
   address: string; site: { mode: 'builtin' | 'html' | 'proxy'; proxy: string; title: string; domain: string }
   acme_email: string; block_bt: boolean; block_ports: number[] | null; block_hosts: string[] | null; access_days: number
-  takeover_443: boolean; takeover_proxy: boolean
+  share_443: '' | 'cloudflare' | 'takeover'; share_skip: string[] | null; takeover_443?: boolean; takeover_proxy: boolean
 }
 interface Cert { domain: string; issuer: string; not_after: number; self_signed: boolean; status?: string }
 interface ProxyResp {
@@ -873,17 +873,29 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
           {data.port443 && (
             <div className="grid gap-3 rounded-xl border border-warning/50 p-4">
               <div className="text-sm font-medium">公网 443 已经转发给「{data.port443.forward}」（{data.port443.target}）</div>
-              <label className="flex items-start gap-2 text-sm">
-                <Switch checked={s.takeover_443} onCheckedChange={(c) => set({ takeover_443: c })} />
-                <span>接管 443，按域名分流
-                  <span className="block text-xs text-muted-foreground">需要共用 443 的节点时才会生效：节点的域名交给 Xray，其他所有连接（包括你的网站、Cloudflare 回源）原样转给 {data.port443.target}，证书仍由那台服务器自己处理。原来那条端口转发会被暂时停用；不再需要 443 分流、卸载扩展或卸载面板时自动恢复。</span>
-                </span>
-              </label>
-              {s.takeover_443 && (
+              <p className="text-xs text-muted-foreground">想让节点也用 443（按域名分流）时，选择和这条转发怎么共处。只有存在「共用 443」的节点时才会生效。</p>
+              <div className="grid gap-2">
+                {([
+                  ['cloudflare', '按来源分流（推荐：网站开了 Cloudflare 小云朵时）', `来自 Cloudflare 的连接照旧走原来的转发，一点不变，那台服务器看到的来源也和现在一样；其他来源的 443 交给分流器：节点的域名给 Xray，其余原样转给 ${data.port443.target}。原来的转发规则不改。`],
+                  ['takeover', '完全接管', `所有来源的 443 都先到分流器，节点以外的连接原样转给 ${data.port443.target}。原来的转发暂停（不需要时自动恢复）。那台服务器看到的来源会变成路由器，除非它接受 PROXY 协议。`],
+                  ['', '不共用', '443 只给原来的转发；节点使用独立端口。'],
+                ] as const).map(([k, l, d]) => (
+                  <label key={k} className={cn('flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm', (s.share_443 || (s.takeover_443 ? 'takeover' : '')) === k ? 'border-primary bg-accent' : 'hover:bg-muted')}>
+                    <input type="radio" className="mt-1" checked={(s.share_443 || (s.takeover_443 ? 'takeover' : '')) === k} onChange={() => set({ share_443: k, takeover_443: false })} />
+                    <span>{l}<span className="block text-xs text-muted-foreground">{d}</span></span>
+                  </label>
+                ))}
+              </div>
+              {s.share_443 === 'cloudflare' && (
+                <Field label="另外放行给原转发的来源（可选）" hint="一行一个 IPv4 地址或网段，例如你用来管理 1Panel 的固定 IP">
+                  <Textarea rows={2} value={(s.share_skip ?? []).join('\n')} onChange={(e) => set({ share_skip: e.target.value.split(/\n/).map((x) => x.trim()) })} className="font-mono text-xs" />
+                </Field>
+              )}
+              {s.share_443 === 'takeover' && (
                 <label className="flex items-start gap-2 text-sm">
                   <Switch checked={s.takeover_proxy} onCheckedChange={(c) => set({ takeover_proxy: c })} />
                   <span>向 {data.port443.target} 发送 PROXY 协议
-                    <span className="block text-xs text-muted-foreground">不开：那台服务器看到的来源 IP 会变成路由器（网站经过 Cloudflare 时不影响，真实访客 IP 仍在 CF-Connecting-IP 里）。开：服务器能拿到真实来源 IP，但它必须配置为接受 PROXY 协议（例如 nginx 的 listen 443 ssl proxy_protocol），否则网站会打不开。</span>
+                    <span className="block text-xs text-muted-foreground">服务器必须配置为接受 PROXY 协议（例如 nginx 的 listen 443 ssl proxy_protocol），否则网站会打不开。</span>
                   </span>
                 </label>
               )}

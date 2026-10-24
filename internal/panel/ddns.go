@@ -136,7 +136,6 @@ func providerOf(id string) *ddnsProvider {
 	return nil
 }
 
-
 // GET /api/ddns
 func (a *App) handleDDNS(w http.ResponseWriter, r *http.Request) {
 	list, err := a.ddnsList()
@@ -525,7 +524,6 @@ func (a *App) apiIP(api string, v6 bool, dev string) (string, error) {
 	return ip, nil
 }
 
-
 // detect returns the address to publish.
 func (a *App) detectIP(d *DDNS) (string, string, error) {
 	v6 := d.RType == "AAAA"
@@ -877,7 +875,11 @@ func dnspodCall(d *DDNS, action string, payload map[string]any, out any) error {
 	ts := time.Now().Unix()
 	date := time.Unix(ts, 0).UTC().Format("2006-01-02")
 	sum := func(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
-	hm := func(key []byte, s string) []byte { m := hmac.New(sha256.New, key); m.Write([]byte(s)); return m.Sum(nil) }
+	hm := func(key []byte, s string) []byte {
+		m := hmac.New(sha256.New, key)
+		m.Write([]byte(s))
+		return m.Sum(nil)
+	}
 	canon := "POST\n/\n\ncontent-type:application/json; charset=utf-8\nhost:" + host + "\nx-tc-action:" + strings.ToLower(action) + "\n\ncontent-type;host;x-tc-action\n" + sum(body)
 	scope := date + "/" + service + "/tc3_request"
 	toSign := "TC3-HMAC-SHA256\n" + strconv.FormatInt(ts, 10) + "\n" + scope + "\n" + sum([]byte(canon))
@@ -1011,7 +1013,6 @@ func porkbunUpdate(d *DDNS, ip string) (string, error) {
 	}
 	return "", lastErr
 }
-
 
 func namecheapUpdate(d *DDNS, ip string) (string, error) {
 	if d.RType != "A" {

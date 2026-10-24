@@ -88,7 +88,7 @@ const (
 	proxyPortBase  = 20100
 )
 
-func (n *ProxyNode) inner() int { return proxyPortBase + int(n.ID) }
+func (n *ProxyNode) inner() int  { return proxyPortBase + int(n.ID) }
 func (n *ProxyNode) tag() string { return "n" + strconv.FormatInt(n.ID, 10) }
 func proxyEmail(uid, nid int64) string {
 	return "u" + strconv.FormatInt(uid, 10) + "@n" + strconv.FormatInt(nid, 10)
@@ -409,8 +409,8 @@ func buildXray(nodes []*ProxyNode, users []*ProxyUser, pol proxyPolicy, frontHTT
 	}
 	rules = append(rules, jm{"ip": privateCIDRs, "outboundTag": "blocked"})
 	cfg := jm{
-		"log": jm{"loglevel": "warning", "access": "/tmp/wharf-proxy/access.log", "error": "/tmp/wharf-proxy/error.log", "dnsLog": false},
-		"api": jm{"tag": "api", "services": []string{"StatsService", "HandlerService", "RoutingService"}},
+		"log":   jm{"loglevel": "warning", "access": "/tmp/wharf-proxy/access.log", "error": "/tmp/wharf-proxy/error.log", "dnsLog": false},
+		"api":   jm{"tag": "api", "services": []string{"StatsService", "HandlerService", "RoutingService"}},
 		"stats": jm{},
 		"policy": jm{
 			"levels": jm{"0": jm{"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true, "handshake": 4, "connIdle": 300}},

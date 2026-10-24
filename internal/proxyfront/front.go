@@ -433,6 +433,7 @@ func htmlEscape(s string) string {
 func (f *front) exportLoop() {
 	time.Sleep(5 * time.Second)
 	for {
+		failed := false
 		for _, d := range f.cfg.ACME {
 			c, err := f.acme.GetCertificate(&tls.ClientHelloInfo{
 				ServerName:        d,
@@ -444,6 +445,7 @@ func (f *front) exportLoop() {
 			if err != nil {
 				log.Printf("acme %s: %v", d, err)
 				writeStatus(f.cfg.Dir, d, "error: "+err.Error())
+				failed = true
 				continue
 			}
 			if changed, err := exportCert(f.cfg.Dir, d, c); err != nil {
@@ -453,7 +455,11 @@ func (f *front) exportLoop() {
 			}
 			writeStatus(f.cfg.Dir, d, "ok "+c.Leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
-		time.Sleep(6 * time.Hour)
+		if failed {
+			time.Sleep(10 * time.Minute)
+		} else {
+			time.Sleep(6 * time.Hour)
+		}
 	}
 }
 

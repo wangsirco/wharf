@@ -6,14 +6,14 @@
 - 安装包：`luci-app-wharf`
 
 ## 简介（About，≤ 350 字符）· Description
-- **English（建议用作 About）**：A multi-admin control panel for OpenWrt / iStoreOS — see who's online and what they talk to, share port forwards safely, and diagnose your network. 🇨🇳 中文界面
-- **中文**：给全家人和多位管理员一起用的 OpenWrt 控制面板：设备与流量看得懂、端口转发分得清、网络问题查得到。
+- **English（建议用作 About）**：A multi-admin control panel for OpenWrt / iStoreOS — see who's online and what they talk to, share port forwards safely, run Xray proxy nodes, keep DDNS up and diagnose your network. 🇨🇳 中文界面
+- **中文**：给全家人和多位管理员一起用的 OpenWrt 控制面板：设备与流量看得懂、端口转发分得清、代理节点一键搭、网络问题查得到。
 
 ## 标签 · Topics（最多 20 个）
 ```
-openwrt  istoreos  luci  luci-app  router  router-admin  home-network
-network-monitoring  traffic-analysis  port-forwarding  firewall  dnsmasq
-network-diagnostics  packet-capture  multi-user  rbac  golang  react  self-hosted  pwa
+openwrt  istoreos  luci  luci-app  router  home-network
+network-monitoring  traffic-analysis  port-forwarding  firewall
+xray  reality  ddns  network-diagnostics  packet-capture  multi-user  rbac  golang  react  self-hosted
 ```
 
 ## 其他设置 · Other settings

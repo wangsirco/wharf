@@ -61,6 +61,11 @@ func (a *App) proxyLoop() {
 		a.storeProxyIPs(r.Live.Online)
 		a.enforceIPLimits(r.Live.Online, blocked)
 		a.enforceProxyLimits()
+		if tick%2880 == 10 && a.proxySettings().share() == "cloudflare" && a.refreshCloudflare() {
+			if err := a.reapplyProxy(); err != nil {
+				log.Printf("proxy: reapply after Cloudflare ranges changed: %v", err)
+			}
+		}
 		if tick%120 == 1 {
 			days := a.proxySettings().AccessDays
 			_, _ = a.db.Exec(`DELETE FROM proxy_access WHERE ts < ?`, time.Now().Unix()-int64(days)*86400)
@@ -315,11 +320,11 @@ func (a *App) handleProxyLive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	type onlineIP struct {
-		IP      string `json:"ip"`
-		Seen    int64  `json:"seen"`
-		Country string `json:"country"`
-		City    string `json:"city"`
-		ASOrg   string `json:"as_org"`
+		IP      string  `json:"ip"`
+		Seen    int64   `json:"seen"`
+		Country string  `json:"country"`
+		City    string  `json:"city"`
+		ASOrg   string  `json:"as_org"`
 		Nodes   []int64 `json:"nodes"`
 	}
 	online := map[int64][]onlineIP{}

@@ -24,6 +24,7 @@ OpenWrt is powerful, but LuCI is built for one person who knows networking. **Wh
 - **Understand it.** Every device has a real name and type. You can see what each one talks to (video, AI, games …) and which countries your traffic flies to.
 - **Share it.** Hand a friend a port range or a single device to manage without giving away the root password. Everything they do is audited and can be undone.
 - **Fix it.** Route tracing on a map, packet capture with an automatic diagnosis, scheduled probes with alerts, and a LAN scan. The evidence is ready to send to your ISP.
+- **Host it.** An optional proxy extension runs official Xray on the router: REALITY, Hysteria 2 and more for you and your friends, with limits, expiry and access records. Add dynamic DNS and you no longer need a separate Linux box.
 
 Wharf runs on the router itself as a LuCI package, uses only native OpenWrt mechanisms (firewall redirects, ipset, dnsmasq, conntrack), and never restarts your network.
 

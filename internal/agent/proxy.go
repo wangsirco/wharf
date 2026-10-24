@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/pem"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -567,6 +567,7 @@ func lastProxyLog(inst string) string {
 }
 
 func uninstallProxy() error {
+	clearIntercept()
 	jobLog("停止并移除服务")
 	_ = proxyService("stop")
 	_, _ = run(10*time.Second, proxyInit, "disable")
@@ -587,6 +588,8 @@ type ProxyApply struct {
 	Front string            `json:"front"` // front config; "" = front stopped
 	Site  map[string]string `json:"site"`  // files under site/ (camouflage page, subs/<token>)
 	Certs []ProxyCert       `json:"certs"` // certificates TLS nodes need on disk
+	// Intercept shares WAN 443 with an untouched port forward by source address (nil = none)
+	Intercept *ProxyIntercept `json:"intercept,omitempty"`
 }
 
 type ProxyCert struct {
@@ -628,7 +631,7 @@ func ApplyProxy(req ProxyApply) (ProxyApplyResult, error) {
 	pruneCerts(req)
 
 	runDir := filepath.Join(proxyDir, "run")
-	files := map[string]string{"xray.json": strings.ReplaceAll(req.Xray, ProxyDirMarker, proxyDir), "front.json": req.Front}
+	files := map[string]string{"xray.json": strings.ReplaceAll(req.Xray, ProxyDirMarker, proxyDir), "front.json": strings.ReplaceAll(req.Front, ProxyDirMarker, proxyDir)}
 	old := map[string][]byte{}
 	for name, content := range files {
 		p := filepath.Join(runDir, name)
@@ -647,6 +650,12 @@ func ApplyProxy(req ProxyApply) (ProxyApplyResult, error) {
 	syncSite(req.Site, uid, gid)
 
 	if err := writeProxyInit(); err != nil {
+		return res, err
+	}
+	if req.Front == "" {
+		req.Intercept = nil
+	}
+	if err := setIntercept(req.Intercept); err != nil {
 		return res, err
 	}
 	if len(res.Changed) == 0 {
@@ -858,8 +867,12 @@ func RunProxyStats() {
 	last := time.Now()
 	n := 0
 	certs := certsStamp()
+	keepIntercept(true)
 	for now := range t.C {
 		n++
+		if n%2 == 0 {
+			keepIntercept(false)
+		}
 		if n%12 == 0 { // the front renewed a certificate: Xray must load it
 			if c := certsStamp(); c != certs {
 				certs = c
@@ -1205,7 +1218,6 @@ func BlockProxyIP(ip string) error {
 	_, err := run(8*time.Second, xrayBin(), "api", "sib", "-s", addr, "-outbound=blocked", ip)
 	return err
 }
-
 
 // ProxyCert describes a certificate on disk for the panel.
 type ProxyCertInfo struct {
