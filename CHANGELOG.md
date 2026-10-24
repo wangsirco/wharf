@@ -1,5 +1,12 @@
 # Changelog · 更新日志
 
+## 0.18.0 — proxy extension and DDNS · 代理扩展与动态域名
+
+- Optional proxy extension: official Xray-core installed online and run as nobody; VLESS / REALITY / Vision / XHTTP / Trojan / VMess / SS2022 / Hysteria 2 · 代理扩展
+- Nodes linked to the firewall and port checks; shared 443 routed by SNI, optional takeover of an existing 443 forward; ACME certificates · 防火墙联动、443 分流、自动证书
+- Proxy users with traffic limits, expiry, IP limits, subscriptions, QR codes; live dashboard, access records; `proxy.manage` permission · 代理用户、大屏、访问记录
+- Dynamic DNS with 9 providers, multi-WAN, IPv6 · 动态域名 DDNS
+
 ## 0.17.0 — first public release · 首个公开版本
 
 - Signed online updates from GitHub Releases, per component (web UI hot-swap, program via opkg) · 按组件的签名在线更新

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  Activity, ArrowLeftRight, BarChart3, Ban, BellRing, Earth, ShieldAlert, Search as SearchIcon, ClipboardCheck, Globe, LayoutDashboard, ShieldHalf, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Users, X, KeyRound, Inbox, Wrench, Cpu, Sparkles, ArrowUpCircle,
+  Activity, ArrowLeftRight, BarChart3, Ban, BellRing, Earth, ShieldAlert, Search as SearchIcon, ClipboardCheck, Globe, LayoutDashboard, ShieldHalf, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Users, X, KeyRound, Inbox, Wrench, Cpu, Sparkles, ArrowUpCircle, Rocket, Waypoints,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useApi } from '@/lib/hooks'
@@ -29,6 +29,7 @@ const nav: { title?: string; items: NavItem[] }[] = [
       { to: '/world', label: '全球流量', icon: Earth, perm: 'traffic.view' },
       { to: '/dns', label: 'DNS 拦截', icon: ShieldAlert, perm: 'traffic.view' },
       { to: '/forwards', label: '端口转发', icon: ArrowLeftRight, perm: 'forwards.view' },
+      { to: '/proxy', label: '代理', icon: Rocket, perm: 'proxy.manage' },
       { to: '/controls', label: '设备管控', icon: Ban, perm: 'access.manage' },
       { to: '/tools', label: '网络工具', icon: Wrench, perm: 'tools.diag|tools.capture|tools.wol|system.view' },
       { to: '/system', label: '系统维护', icon: Cpu, perm: 'system.view' },
@@ -43,6 +44,7 @@ const nav: { title?: string; items: NavItem[] }[] = [
       { to: '/audit', label: '操作审计', icon: ScrollText, super: true },
       { to: '/visitors', label: '访问记录', icon: Globe, super: true },
       { to: '/alerts', label: '告警推送', icon: BellRing, super: true },
+      { to: '/ddns', label: '动态域名 DDNS', icon: Waypoints, super: true },
       { to: '/access', label: '面板访问控制', icon: ShieldHalf, super: true },
       { to: '/settings', label: '系统设置', icon: Settings, super: true },
     ],

@@ -159,6 +159,30 @@ var migrations = []string{
 		mac TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL, proto TEXT NOT NULL, remote TEXT NOT NULL, rport INTEGER NOT NULL DEFAULT 0,
 		up INTEGER NOT NULL, down INTEGER NOT NULL);
 	 CREATE INDEX fwd_conns_target ON fwd_conns(ip, port, end); CREATE INDEX fwd_conns_end ON fwd_conns(end)`,
+	// v15: proxy extension (nodes, proxy users, hourly traffic, access records, source IPs)
+	`CREATE TABLE proxy_nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+		protocol TEXT NOT NULL, transport TEXT NOT NULL, security TEXT NOT NULL, entry TEXT NOT NULL, port INTEGER NOT NULL, wan TEXT NOT NULL DEFAULT '',
+		domain TEXT NOT NULL DEFAULT '', params TEXT NOT NULL DEFAULT '{}', note TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL);
+	 CREATE TABLE proxy_users (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL, name TEXT NOT NULL, secret TEXT NOT NULL,
+		sub_token TEXT NOT NULL UNIQUE, nodes TEXT NOT NULL DEFAULT '[]', limit_bytes INTEGER NOT NULL DEFAULT 0, reset_day INTEGER NOT NULL DEFAULT 0,
+		expire_at INTEGER NOT NULL DEFAULT 0, ip_limit INTEGER NOT NULL DEFAULT 0, allow_lan INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+		stopped TEXT NOT NULL DEFAULT '', used_up INTEGER NOT NULL DEFAULT 0, used_down INTEGER NOT NULL DEFAULT 0, period_at INTEGER NOT NULL DEFAULT 0,
+		note TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);
+	 CREATE TABLE proxy_traffic (hour INTEGER NOT NULL, user_id INTEGER NOT NULL, node_id INTEGER NOT NULL, up INTEGER NOT NULL, down INTEGER NOT NULL,
+		PRIMARY KEY (hour, user_id, node_id));
+	 CREATE TABLE proxy_access (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, last INTEGER NOT NULL, user_id INTEGER NOT NULL,
+		node_id INTEGER NOT NULL, ip TEXT NOT NULL, dest TEXT NOT NULL, port INTEGER NOT NULL, net TEXT NOT NULL, status TEXT NOT NULL, count INTEGER NOT NULL);
+	 CREATE INDEX proxy_access_ts ON proxy_access(ts); CREATE INDEX proxy_access_user ON proxy_access(user_id, ts);
+	 CREATE TABLE proxy_ips (user_id INTEGER NOT NULL, ip TEXT NOT NULL, first INTEGER NOT NULL, last INTEGER NOT NULL, PRIMARY KEY (user_id, ip))`,
+	// v16: DDNS
+	`CREATE TABLE ddns (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, provider TEXT NOT NULL,
+		creds TEXT NOT NULL DEFAULT '{}', domain TEXT NOT NULL, rtype TEXT NOT NULL DEFAULT 'A', source TEXT NOT NULL DEFAULT '{}',
+		interval_min INTEGER NOT NULL DEFAULT 5, on_change INTEGER NOT NULL DEFAULT 1, ttl INTEGER NOT NULL DEFAULT 300, proxied INTEGER NOT NULL DEFAULT 0,
+		last_ip TEXT NOT NULL DEFAULT '', last_ok INTEGER NOT NULL DEFAULT 0, last_run INTEGER NOT NULL DEFAULT 0, last_err TEXT NOT NULL DEFAULT '',
+		created INTEGER NOT NULL);
+	 CREATE TABLE ddns_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ddns_id INTEGER NOT NULL, ts INTEGER NOT NULL, ip TEXT NOT NULL, ok INTEGER NOT NULL,
+		msg TEXT NOT NULL DEFAULT '');
+	 CREATE INDEX ddns_log_id ON ddns_log(ddns_id, ts)`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

@@ -221,6 +221,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, DepStatus())
+	case strings.HasPrefix(r.URL.Path, "/v1/proxy"):
+		s.proxy(w, r, body)
 	case r.Method == "GET" && r.URL.Path == "/v1/forward-live":
 		if s.Collector == nil {
 			writeJSON(w, 503, map[string]string{"error": "traffic collection disabled"})
@@ -229,6 +231,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.Collector.LiveInbound())
 	case r.Method == "GET" && r.URL.Path == "/v1/diag/iperf-server":
 		writeJSON(w, 200, IperfServerStatus())
+	case r.Method == "GET" && r.URL.Path == "/v1/iface":
+		name := r.URL.Query().Get("name")
+		if name == "" || strings.ContainsAny(name, "/. ") {
+			writeJSON(w, 400, map[string]string{"error": "bad interface"})
+			return
+		}
+		writeJSON(w, 200, WANStatus(name))
 	case r.Method == "GET" && r.URL.Path == "/v1/wans":
 		writeJSON(w, 200, WANList())
 	case r.Method == "GET" && r.URL.Path == "/v1/listen":
@@ -382,6 +391,69 @@ func (s *Server) capture(w http.ResponseWriter, r *http.Request, body []byte) {
 			w.Header().Set("Content-Length", strconv.FormatInt(st.Size(), 10))
 		}
 		_, _ = io.Copy(w, f)
+	default:
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+	}
+}
+
+func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte) {
+	fail := func(err error) { writeJSON(w, 400, map[string]string{"error": err.Error()}) }
+	switch r.Method + " " + r.URL.Path {
+	case "GET /v1/proxy":
+		writeJSON(w, 200, GetProxyStatus())
+	case "POST /v1/proxy/install":
+		var req struct {
+			Tag string `json:"tag"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			fail(err)
+			return
+		}
+		if err := StartProxyInstall(req.Tag); err != nil {
+			fail(err)
+			return
+		}
+		writeJSON(w, 200, GetProxyStatus())
+	case "POST /v1/proxy/uninstall":
+		if err := StartProxyUninstall(); err != nil {
+			fail(err)
+			return
+		}
+		writeJSON(w, 200, GetProxyStatus())
+	case "POST /v1/proxy/apply":
+		var req ProxyApply
+		if err := json.Unmarshal(body, &req); err != nil {
+			fail(err)
+			return
+		}
+		res, err := ApplyProxy(req)
+		if err != nil {
+			fail(err)
+			return
+		}
+		writeJSON(w, 200, res)
+	case "GET /v1/proxy/stats":
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		boot, mins, live := ProxySince(after)
+		writeJSON(w, 200, map[string]any{"boot": boot, "minutes": mins, "live": live})
+	case "GET /v1/proxy/log":
+		n, _ := strconv.Atoi(r.URL.Query().Get("lines"))
+		writeJSON(w, 200, map[string]any{"error": ProxyErrorLog(n)})
+	case "GET /v1/proxy/certs":
+		writeJSON(w, 200, ProxyCerts())
+	case "POST /v1/proxy/block":
+		var req struct {
+			IP string `json:"ip"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			fail(err)
+			return
+		}
+		if err := BlockProxyIP(req.IP); err != nil {
+			fail(err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 	}

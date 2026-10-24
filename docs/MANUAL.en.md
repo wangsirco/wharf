@@ -64,6 +64,8 @@ Wharf turns this into a panel that family members can read, that admins can safe
 | **World map** | Animated flow lines from home to countries and cities (Pacific-centred), 24 h / 7 d / 30 d |
 | **DNS & NextDNS** | Query trend, block reasons, top blocked / queried domains, per-device view, resolved countries, recent queries |
 | **Port forwarding** | Source restriction by country or IP range, deny list, per-admin port ranges, conflict checks with free-port suggestions, multi-WAN binding, **usage and connection analytics** (service fingerprint, who connected, scan / brute-force verdicts, live connections) |
+| **Proxy extension** | Official Xray installed online (version of your choice): VLESS / REALITY / XTLS Vision / XHTTP / Trojan / VMess / Shadowsocks 2022 / Hysteria 2; nodes tied into the firewall, shared 443 routed by name, automatic certificates; per-user traffic limits, expiry, simultaneous-IP limits, subscriptions and QR codes; live big screen and access records |
+| **Dynamic DNS** | Cloudflare, Alibaba Cloud, DNSPod, GoDaddy, Porkbun, Namecheap, DuckDNS, DynDNS protocol, custom URL; any subdomain depth, IPv4 / IPv6, multi-WAN; update on change and / or on a timer |
 | **Device controls** | One-click block, allow / deny lists by service or domain, schedules, block access to router ports, force router DNS, keep connectivity checks working while blocked |
 | **Network tools** | Route trace (map + per-hop ASN), TCP ping, DNS comparison, HTTP timing, browser / iperf3 LAN speed tests, **scheduled monitors with alerts**, LAN scan, **packet capture with automatic analysis**, Wake-on-LAN, UPnP, local DNS records |
 | **System** | CPU / memory / disk / temperature, plugin services, system log, reboot and scheduled reboot, backup and restore, **dependency manager** |
@@ -422,6 +424,75 @@ Wharf updates from GitHub Releases (default repository `wangsirco/wharf`), **one
   - Only the super admin can update, and every update is audited.
 - If a new UI misbehaves, one click restores the UI built into the program.
 
+### 6.15 Proxy extension (Xray)
+
+Run proxy nodes on the router itself, for you and your friends, without setting up a separate Linux box and panel on the LAN. Open *代理* (Proxy) in the sidebar.
+
+**Installing:** this is an optional extension and is not part of the package. The super admin picks a version on the *Proxy* page and installs it online:
+
+- The core is downloaded from the official XTLS/Xray-core GitHub release and checked against the release's own SHA-256 (about 13 MB).
+- You choose the version: a stable release (recommended) or a pre-release. Only versions that the generated configuration works with are listed (v26.1.23 and later).
+- Before installing, Wharf checks the CPU architecture and free space. After installing, it runs a self-test and checks the existing nodes against the new core before switching. If the new core fails to start, it rolls back to the previous one.
+- The core lives in `<data_dir>-proxy` (for example `/mnt/data/owp-proxy`) and runs as **nobody** under `/etc/init.d/wharf-proxy`. The xray that PassWall / OpenClash installed is neither used nor touched.
+- *Extension settings* (扩展设置) switches versions, shows the error log and uninstalls the extension. Uninstalling stops the service, closes every node's port and deletes the core and certificates; nodes and users stay in the panel and come back after a reinstall.
+
+**Nodes:** each node is one entry point. Supported combinations:
+
+| Protocol | Transport | Security | Notes |
+|---|---|---|---|
+| VLESS | RAW + Vision / XHTTP / gRPC | REALITY | recommended; no domain or certificate needed |
+| VLESS | RAW + Vision / XHTTP / WebSocket / gRPC / HTTPUpgrade | TLS | your own domain; WebSocket works behind a CDN |
+| Trojan | RAW / WebSocket / gRPC | TLS / REALITY | |
+| VMess | RAW / WebSocket / gRPC / HTTPUpgrade | TLS / none | for older clients |
+| Shadowsocks 2022 | — | built in | UDP supported, simplest setup |
+| Hysteria 2 | QUIC (UDP) | TLS | faster on lossy links |
+
+When you save a node, the panel generates the full Xray configuration and has Xray check it (`xray run -test`) first. Nothing changes on the router unless it passes; if it fails you see Xray's reason.
+
+**Entry and firewall:**
+
+- **Own port:** the node takes one public port. Wharf writes a standard firewall redirect (`owpx_n<id>`, from the public port to the port Xray listens on) and checks conflicts with the same rules as port forwards: ports the router itself uses, existing forwards, and ranges granted to other admins. The rule goes away when the node is deleted or disabled. These rules appear in the *Port forwards* list, marked *proxy node* and read-only.
+- **Shared 443 (routed by name):** public port 443 goes to the panel's front (`owpx_front`). The front reads the server name (SNI) from the TLS handshake. A node's name is passed, untouched, to that node, with a PROXY protocol header so Xray sees the real client address. Everything else (scanners, people opening the IP, unknown names) sees an ordinary website. The router's own 443 on the LAN is not affected.
+- **When public 443 already belongs to another server** (your website, for example), shared 443 is refused by default. Turn on *Take over 443* (接管 443) in *Extension settings*: the front takes the port, sends node names to Xray, and passes every other connection unchanged to the old server, which still presents its own certificate. The old forward is switched off meanwhile (tagged `wharf_adopted`) and switched back on automatically when shared 443 is no longer needed, or when the extension or the panel is uninstalled. Optionally the front sends that server a PROXY protocol header (the server must expect it, or the site stops working).
+
+**Certificates:** TLS nodes can get Let's Encrypt certificates automatically (TLS-ALPN validation on public 443; port 80 is not needed; renewed automatically) or use a self-signed one. Links for self-signed nodes carry the certificate fingerprint (`pcs` / `pinSHA256`), which Xray 26 clients verify; `allowInsecure` is kept for clients that only know that.
+
+**Users:** each proxy user has a key and a subscription address, and can have:
+
+- the nodes they may use;
+- a traffic limit (up + down; paused automatically when used up) and a monthly reset day;
+- an expiry date (paused automatically);
+- a limit on simultaneous source IPs (new addresses beyond it are refused and you get an alert);
+- access to your home network (off by default: proxy users reach the internet only, never the NAS, the router or other devices; only the super admin can turn it on).
+
+*Links & QR codes* shows an import link and QR code per node, plus the subscription link (needs the shared-443 front running). Regenerating the key invalidates old links at once.
+
+**Overview (big screen):** current up / down rate (every 3 s), today's and this month's usage, users and addresses online; each node's live rate and usage; the usage trend and top users; who is connected, from which address and where. Live rates come from the router's connection table. Totals come from Xray's counters; with Vision, Xray books a connection's bytes when it closes, so long connections show up after they end.
+
+**Access records:** which sites proxy users reached (destination name / IP, port, count, source address and location; services the rules recognise are named), merged per minute and kept 30 days by default. Connections refused by a rule are marked. *Source IPs* lists every address a user connected from. To the outside world your friends' traffic comes from your home IP; these records let you account for it.
+
+**Rules for every proxy user** (extension settings): block BitTorrent (on by default), blocked destination ports (25 by default, against spam), blocked sites (domains, including subdomains).
+
+**Camouflage site:** a clean built-in home page, your own HTML, or a reverse proxy to a site (your NAS's web page, for example). A *site domain* gets a certificate automatically and is used for subscription links.
+
+**Multiple admins:** the permission `proxy.manage` decides who may use the extension. The super admin sees and changes everyone's nodes and users. Scoped admins see only their own; their nodes' ports must be in their granted ranges, their users can only use their own nodes, and they cannot allow LAN access. Quotas `max_proxy_nodes` (default 2) and `max_proxy_users` (default 10). Every change is audited (keys are hidden in the audit).
+
+### 6.16 Dynamic DNS
+
+Keeps DNS records pointing at the router when the public IP changes. *动态域名 DDNS* in the sidebar (super admin).
+
+- **Providers:** Cloudflare, Alibaba Cloud DNS, Tencent Cloud DNSPod, GoDaddy, Porkbun, Namecheap, DuckDNS, any DynDNS-compatible service (No-IP, Dynu, HE.net, Oray …), and a custom URL (with `{ip}` `{domain}` `{type}`).
+- **Name:** the full name, any depth (`home.example.com`, `a.b.example.com`). Wharf finds the zone it belongs to and creates the record if it does not exist. A (IPv4) and AAAA (IPv6) are separate entries.
+- **Where the address comes from:**
+  - *Auto*: the WAN interface's address when it is public, otherwise public "what is my IP" services (for modem dial-up or CGNAT);
+  - *Interface only* or *services only*;
+  - with several WANs, pick the interface; the "what is my IP" requests also leave through it;
+  - services are tried in order (ipify, icanhazip, ip.sb, DNSPod, Cloudflare), and you can add your own URL. *Detect now* shows what every source sees.
+- **When to update (either or both):** as soon as the address changes (the interface is checked every minute, services every 5 minutes), and / or on a timer (5 minutes to daily).
+- Each entry keeps a history (address changes, manual updates, failures). Failures send an alert (once per streak).
+- Credentials are stored only in the panel database and shown with the last 4 characters. Give the panel a token that can only edit DNS (each provider's note says how).
+- For Cloudflare you can choose whether the record is proxied (orange cloud); keep it off for names used by proxy nodes or port forwards.
+
 ---
 
 ## 7. Multiple admins and permissions
@@ -447,10 +518,11 @@ Wharf updates from GitHub Releases (default repository `wangsirco/wharf`), **one
 | `tools.wol` | Tools | Wake-on-LAN |
 | `tools.diag` | Tools | route trace, TCP ping, DNS / HTTP tests, speed tests, LAN scan, monitors |
 | `tools.capture` | Tools | packet capture, analysis, pcap download (can see content; grant carefully) |
+| `proxy.manage` | Proxy | use the proxy extension: own nodes and proxy users (ports within the granted ranges; cannot see others') |
 
 ### 7.3 Quotas and port-range grants
 
-- **Quotas:** how many port forwards (default 5) and static leases (default 10) an admin may create. -1 means unlimited.
+- **Quotas:** how many port forwards (default 5), static leases (default 10), proxy nodes (default 2) and proxy users (default 10) an admin may create. -1 means unlimited.
 - **Port-range grants:** give an admin public port ranges (optionally per WAN) and the LAN IP ranges they may forward to, for example "8000–8010 → 192.168.1.100–192.168.1.120".
   - Ranges are exclusive between admins.
   - Someone else's range stays reserved for them, even against admins without restrictions.
@@ -503,6 +575,7 @@ Wharf only changes things when you use the matching feature, and uses standard c
 | Optional components | opkg packages, recorded in `/etc/wharf-deps.list` | when you install them from the panel | the ones Wharf installed are removed (see section 5) |
 | Byte accounting | `/etc/sysctl.d/90-wharf.conf` | when you enable it in the panel | removed |
 | Panel data | `owp.main.data_dir` (database, certificates, IP database, rules; a downloaded UI goes in its `web/` folder) | while running | kept; delete by hand if you want |
+| Proxy extension | `/etc/init.d/wharf-proxy`; core, config and certificates in `<data_dir>-proxy`; node redirects (`owpx_*`); with *take over 443* the old forward is disabled and tagged `wharf_adopted` | installing the extension, adding nodes | all removed; a taken-over forward is switched back on |
 
 **What Wharf never does:**
 - restart the network or the WAN

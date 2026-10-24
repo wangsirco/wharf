@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowRight, BarChart3, Globe2, Plus, Search, ShieldBan, ShieldCheck } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
@@ -49,6 +50,7 @@ export default function Forwards() {
   const [q, setQ] = useState('')
   const [scope, setScope] = useState('all')
   const canManage = can('forwards.manage')
+  const navigate = useNavigate()
 
   const items = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -90,13 +92,14 @@ export default function Forwards() {
           </TableHeader>
           <TableBody>
             {items.map((f) => (
-              <TableRow key={f.id} className="cursor-pointer" onClick={() => setSel(f)}>
+              <TableRow key={f.id} className="cursor-pointer" onClick={() => (f.kind === 'proxy' ? navigate('/proxy') : setSel(f))}>
                 <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
                   <Switch size="sm" checked={f.enabled} disabled={!f.editable} onCheckedChange={(c) => toggle(f, !!c)} />
                 </TableCell>
                 <TableCell className="w-full max-w-0 sm:w-auto sm:max-w-64">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate font-medium">{f.managed ? f.device_now || f.device_name || f.lan_ip : f.name || f.id}</span>
+                    <span className="truncate font-medium">{f.kind === 'proxy' ? f.name.replace(/^Wharf 代理 · /, '') : f.managed ? f.device_now || f.device_name || f.lan_ip : f.name || f.id}</span>
+                    {f.kind === 'proxy' && <Pill tone="blue">代理节点</Pill>}
                     <VMTag tag={f.vm_tag} />
                     {f.online === false && <span className="shrink-0 text-[11px] text-muted-foreground">离线</span>}
                   </div>
@@ -107,8 +110,8 @@ export default function Forwards() {
                 </TableCell>
                 <TableCell className="whitespace-nowrap pr-4 font-mono text-xs sm:pr-2">{f.wan && <span className="text-muted-foreground">{f.wan}:</span>}{f.wan_port}<span className="ml-1 text-muted-foreground">{protoLabel(f.proto)}</span></TableCell>
                 <TableCell className="hidden w-6 px-0 sm:table-cell"><ArrowRight className="size-3.5 text-muted-foreground" /></TableCell>
-                <TableCell className="hidden whitespace-nowrap font-mono text-xs sm:table-cell">{f.lan_ip}:{f.lan_port}</TableCell>
-                <TableCell className="hidden md:table-cell"><SourceCell f={f} regions={regions} /></TableCell>
+                <TableCell className="hidden whitespace-nowrap font-mono text-xs sm:table-cell">{f.kind === 'proxy' ? `路由器:${f.lan_port}` : `${f.lan_ip}:${f.lan_port}`}</TableCell>
+                <TableCell className="hidden md:table-cell">{f.kind === 'proxy' ? <span className="text-xs text-muted-foreground">由代理用户密钥认证</span> : <SourceCell f={f} regions={regions} />}</TableCell>
                 <TableCell className="whitespace-nowrap py-1"><UsageCell u={usage?.[f.id]} onOpen={() => setStats(f)} /></TableCell>
                 <TableCell className="hidden pr-4 text-muted-foreground lg:table-cell">{f.owner_name || (f.managed ? '—' : '路由器原有')}</TableCell>
               </TableRow>

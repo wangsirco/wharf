@@ -22,6 +22,7 @@ var Permissions = []PermDef{
 	{"system.manage", "系统", "系统维护", "重启、定时重启、开关插件、UPnP、自定义解析（重启和开关插件需超级管理员批准）"},
 	{"tools.wol", "工具", "网络唤醒", "向局域网设备发送唤醒包"},
 	{"tools.diag", "工具", "网络诊断", "路由追踪、TCP Ping、DNS / HTTP 测试、内网测速（iperf3）、局域网扫描、定时监控"},
+	{"proxy.manage", "代理", "代理扩展", "在路由器上建自己的代理节点和代理用户（端口沿用分配给他的端口段；看不到别人的节点）"},
 	{"tools.capture", "工具", "抓包", "在路由器上抓包、查看分析、下载 pcap（能看到通信内容，谨慎授予；每次操作都记入审计）"},
 }
 
@@ -35,6 +36,8 @@ type QuotaDef struct {
 var Quotas = []QuotaDef{
 	{"max_forwards", "最多端口转发条数", 5},
 	{"max_static_hosts", "最多静态绑定条数", 10},
+	{"max_proxy_nodes", "最多代理节点数", 2},
+	{"max_proxy_users", "最多代理用户数", 10},
 }
 
 func validPerm(k string) bool {

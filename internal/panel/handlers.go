@@ -98,6 +98,23 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("GET /api/rules/catalog", a.auth("traffic.view", a.handleCatalog))
 	m.HandleFunc("POST /api/probe", a.auth("traffic.view", a.handleProbe))
 
+	m.HandleFunc("GET /api/proxy", a.auth("proxy.manage", a.handleProxy))
+	m.HandleFunc("GET /api/proxy/live", a.auth("proxy.manage", a.handleProxyLive))
+	m.HandleFunc("GET /api/proxy/stats", a.auth("proxy.manage", a.handleProxyStats))
+	m.HandleFunc("GET /api/proxy/access", a.auth("proxy.manage", a.handleProxyAccess))
+	m.HandleFunc("GET /api/proxy/users/{id}/links", a.auth("proxy.manage", a.handleProxyLinks))
+	m.HandleFunc("GET /api/proxy/users/{id}/ips", a.auth("proxy.manage", a.handleProxyIPs))
+	m.HandleFunc("GET /api/proxy/versions", a.super(a.handleProxyVersions))
+	m.HandleFunc("POST /api/proxy/ext", a.super(a.handleProxyExt))
+	m.HandleFunc("POST /api/proxy/activate", a.super(a.handleProxyActivate))
+	m.HandleFunc("GET /api/proxy/log", a.super(a.handleProxyLog))
+	m.HandleFunc("GET /api/ddns", a.super(a.handleDDNS))
+	m.HandleFunc("POST /api/ddns", a.super(a.handleDDNSSave))
+	m.HandleFunc("DELETE /api/ddns/{id}", a.super(a.handleDDNSDelete))
+	m.HandleFunc("POST /api/ddns/{id}/run", a.super(a.handleDDNSRun))
+	m.HandleFunc("GET /api/ddns/{id}/log", a.super(a.handleDDNSLog))
+	m.HandleFunc("POST /api/ddns/detect", a.super(a.handleDDNSDetect))
+
 	// super admin only
 	m.HandleFunc("GET /api/users", a.super(a.handleUsers))
 	m.HandleFunc("POST /api/users", a.super(a.handleUserCreate))

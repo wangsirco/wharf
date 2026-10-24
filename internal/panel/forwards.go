@@ -55,6 +55,7 @@ type Forward struct {
 	OwnerName  string   `json:"owner_name"`
 	Editable   bool     `json:"editable"`
 	Created    int64    `json:"created"`
+	Kind       string   `json:"kind,omitempty"` // "proxy": a proxy node's port, managed on the proxy page
 }
 
 func optStr(s Section, k string) string {
@@ -141,6 +142,10 @@ func (st *fwState) forward(id string) *Forward {
 	if f.LanPort == "" {
 		f.LanPort = f.WanPort
 	}
+	if strings.HasPrefix(id, "owpx_") {
+		f.Kind, f.Managed = proxyKind, true
+		return f
+	}
 	if m := st.owp[id]; m != nil && m[".type"] == "forward" {
 		f.Managed = true
 		f.DeviceName, f.DeviceMAC, f.Note, f.Wan = optStr(m, "device"), optStr(m, "mac"), optStr(m, "note"), optStr(m, "wan")
@@ -199,14 +204,14 @@ func (a *App) handleForwards(w http.ResponseWriter, r *http.Request) {
 			f.DeviceNow, f.VMTag = v.name, v.tag
 			f.Online = &v.online
 		}
-		f.Editable = u.Can("forwards.manage") && a.canTouch(u, "firewall", id)
+		f.Editable = u.Can("forwards.manage") && a.canTouch(u, "firewall", id) && f.Kind == ""
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool { return portNum(out[i].WanPort) < portNum(out[j].WanPort) })
 	quota := u.Quota("max_forwards")
 	used := 0
 	for _, f := range out {
-		if f.OwnerID == u.ID {
+		if f.OwnerID == u.ID && f.Kind == "" {
 			used++
 		}
 	}
@@ -442,6 +447,9 @@ func prepareForward(a *App, u *User, raw json.RawMessage) (string, error) {
 		if f == nil {
 			return "", errors.New("端口转发不存在")
 		}
+		if f.Kind == proxyKind {
+			return "", errors.New("这是代理节点的端口，请在「代理」页面管理")
+		}
 		if f.Rev != req.Rev {
 			return "", errors.New("该规则在路由器上已被修改，请刷新后重试")
 		}
@@ -451,7 +459,7 @@ func prepareForward(a *App, u *User, raw json.RawMessage) (string, error) {
 	} else if q := u.Quota("max_forwards"); q >= 0 {
 		n := 0
 		for id := range st.fw {
-			if st.forward(id) != nil && a.owner("firewall", id) == u.ID {
+			if f := st.forward(id); f != nil && f.Kind == "" && a.owner("firewall", id) == u.ID {
 				n++
 			}
 		}
@@ -769,6 +777,9 @@ func prepareForwardRef(a *App, u *User, raw json.RawMessage, verb string) (*Forw
 	f := st.forward(req.ID)
 	if f == nil {
 		return nil, errors.New("端口转发不存在")
+	}
+	if f.Kind == proxyKind {
+		return nil, errors.New("这是代理节点的端口，请在「代理」页面管理")
 	}
 	if f.Rev != req.Rev {
 		return nil, errors.New("该规则在路由器上已被修改，请刷新后重试")

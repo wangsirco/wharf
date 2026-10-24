@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f7f6f3; --fg:#22211f; --mute:#77736c; --line:#e3e0da; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151514; --fg:#ecebe8; --mute:#9a968f; --line:#2c2b29; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; background:var(--bg); color:var(--fg);
+         font: 16px/1.65 ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  main { flex:1; display:flex; align-items:center; justify-content:center; padding:48px 20px; }
+  .card { max-width:560px; width:100%; }
+  h1 { font-size:28px; font-weight:600; letter-spacing:-.01em; margin:0 0 12px; }
+  p { margin:0 0 14px; color:var(--mute); }
+  hr { border:0; border-top:1px solid var(--line); margin:28px 0; }
+  .row { display:flex; gap:10px; align-items:center; color:var(--mute); font-size:14px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#5aa469; display:inline-block; }
+  footer { padding:20px; text-align:center; font-size:13px; color:var(--mute); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>{{title}}</h1>
+    <p>Notes, small projects and things I'm tinkering with at home.</p>
+    <p>The site is being rebuilt. New posts will be back soon.</p>
+    <hr>
+    <div class="row"><span class="dot"></span><span>All systems normal</span></div>
+  </div>
+</main>
+<footer>&copy; <script>document.write(new Date().getFullYear())</script> {{title}}</footer>
+</body>
+</html>

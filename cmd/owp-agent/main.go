@@ -21,6 +21,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/wangsirco/wharf/internal/agent"
+	"github.com/wangsirco/wharf/internal/proxyfront"
 	"github.com/wangsirco/wharf/internal/sign"
 	"github.com/wangsirco/wharf/internal/tlsutil"
 )
@@ -51,6 +52,12 @@ func setLocalTimezone() {
 
 func main() {
 	setLocalTimezone()
+	if len(os.Args) > 2 && os.Args[1] == "proxy-front" { // proxy extension's TLS front (runs as nobody)
+		fs := flag.NewFlagSet("proxy-front", flag.ExitOnError)
+		cfg := fs.String("c", "", "front config")
+		_ = fs.Parse(os.Args[2:])
+		log.Fatal(proxyfront.Run(*cfg))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "genkey" {
 		fmt.Printf("key_id=%s\nsecret=%s\n", sign.RandomHex(4), sign.RandomHex(32))
 		return
@@ -93,6 +100,8 @@ func main() {
 		}
 	}
 
+	agent.SetProxyDir(*dataDir)
+	go agent.RunProxyStats()
 	handler := agent.NewServer(agent.Config{Listen: *listen, KeyID: *keyID, Secret: *secret, AllowFrom: strings.Fields(*allow), DataDir: *dataDir})
 	// OWP_COLLECT=0 runs an API-only instance (testing) that never touches the firewall
 	if def("collect", "1") == "1" && os.Getenv("OWP_COLLECT") != "0" {

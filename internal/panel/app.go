@@ -243,6 +243,8 @@ func (a *App) Start() {
 	go a.presenceLoop()
 	go a.monitorLoop()
 	go a.alertEngine()
+	go a.proxyLoop()
+	go a.ddnsLoop()
 	log.Printf("panel ready")
 }
 

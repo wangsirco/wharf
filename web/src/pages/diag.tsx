@@ -53,7 +53,7 @@ function Elapsed({ est }: { est: number }) {
   )
 }
 
-function CopyText({ text }: { text: string }) {
+export function CopyText({ text }: { text: string }) {
   const [ok, setOk] = useState(false)
   return (
     <button type="button" className="group flex w-full items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-left font-mono text-xs hover:bg-muted"

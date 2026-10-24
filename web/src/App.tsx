@@ -28,6 +28,8 @@ import World from '@/pages/world'
 import Alerts from '@/pages/alerts'
 import SystemPage from '@/pages/system'
 import Tools from '@/pages/tools'
+import ProxyPage from '@/pages/proxy'
+import DDNSPage from '@/pages/ddns'
 
 function Home() {
   const { can } = useAuth()
@@ -71,6 +73,8 @@ function Routed() {
         <Route path="tools" element={<Tools />} />
         <Route path="requests" element={<Requests />} />
         <Route path="forwards" element={<Forwards />} />
+        <Route path="proxy" element={<ProxyPage />} />
+        <Route path="ddns" element={superOnly(<DDNSPage />)} />
         <Route path="access" element={superOnly(<Access />)} />
         <Route path="account" element={<Account />} />
         <Route path="users" element={superOnly(<Users />)} />

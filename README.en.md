@@ -57,6 +57,8 @@ Wharf runs on the router itself as a LuCI package, uses only native OpenWrt mech
 | **Traffic & world map** | Per-device ranking, household breakdown, animated world flow map (24 h / 7 d / 30 d) |
 | **DNS** | Query trends, block reasons, top domains, per-device view (dnsmasq log, or optional NextDNS API) |
 | **Port forwarding** | Restrict sources by country / IP range, deny lists, per-admin port ranges, conflict checks, multi-WAN binding. **Usage analytics:** service fingerprinting (SSH, HTTPS, RDP …), who connected, scan and brute-force detection, live connections |
+| **Proxy extension** | Official Xray installed online (sandboxed, version of your choice): REALITY / XTLS Vision / XHTTP / Trojan / VMess / SS2022 / Hysteria 2; firewall-linked nodes, shared 443 routed by SNI, automatic certificates; per-user limits, expiry, subscriptions and QR codes; live big screen and access records |
+| **Dynamic DNS** | Cloudflare, Alibaba Cloud, DNSPod, GoDaddy and more; any subdomain depth, IPv4 / IPv6, multi-WAN; update on change or on a timer |
 | **Device controls** | One-click block, allow / deny lists by service or domain, schedules, block router ports, force router DNS |
 | **Network tools** | Route trace with map and per-hop ASN, TCP ping, DNS comparison, HTTP timing waterfall, browser and iperf3 LAN speed tests, **scheduled monitors with alerts and CSV export**, LAN scan with port discovery, **packet capture with expert-style analysis** and pcap download, Wake-on-LAN, UPnP, local DNS records |
 | **System** | CPU / memory / disk / temperature, plugin services, logs, scheduled reboot, config backup and restore, **optional dependency manager** |

@@ -6,6 +6,22 @@ changed=0
 for r in owp_panel owp_agent; do
 	uci -q get firewall.$r >/dev/null && uci delete firewall.$r && changed=1
 done
+# proxy extension: its service, downloaded core and data, and the WAN redirects of its nodes
+if [ -f /etc/init.d/wharf-proxy ]; then
+	dir="$(sed -n 's/^DIR=//p' /etc/init.d/wharf-proxy)"
+	/etc/init.d/wharf-proxy stop >/dev/null 2>&1
+	/etc/init.d/wharf-proxy disable >/dev/null 2>&1
+	rm -f /etc/init.d/wharf-proxy
+	case "$dir" in /*-proxy) rm -rf "$dir" ;; esac
+fi
+rm -rf /tmp/wharf-proxy
+for r in $(uci -q show firewall | sed -n "s/^firewall\.\(owpx_[a-z0-9_]*\)=redirect$/\1/p"); do
+	uci delete firewall.$r && changed=1
+done
+# a port forward the proxy front took WAN 443 over from gets its port back
+for r in $(uci -q show firewall | sed -n "s/^firewall\.\([^.]*\)\.wharf_adopted='1'$/\1/p"); do
+	uci -q delete firewall.$r.enabled; uci -q delete firewall.$r.wharf_adopted; changed=1
+done
 [ "$changed" = 1 ] && uci commit firewall && /etc/init.d/firewall reload >/dev/null 2>&1
 # traffic accounting hook
 iptables -w -D FORWARD -j owp_acct 2>/dev/null
