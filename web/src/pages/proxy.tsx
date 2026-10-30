@@ -942,6 +942,7 @@ function OnePanelCard({ target }: { target: string }) {
   const [form, setForm] = useState<{ url: string; key: string } | null>(null)
   const [busy, setBusy] = useState(false)
   if (!data) return null
+  const sites = data.sites ?? []
   const f = form ?? { url: data.url || `http://${target.replace(/:\d+$/, '')}:8888`, key: data.key }
   const save = async (disconnect = false) => {
     setBusy(true)
@@ -955,7 +956,7 @@ function OnePanelCard({ target }: { target: string }) {
     <div className="grid gap-3 rounded-lg border p-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         {target} 是 1Panel？
-        {data.url && !data.error && <Pill tone="green">已连接 · {data.sites.length} 个网站</Pill>}
+        {data.url && !data.error && <Pill tone="green">已连接 · {sites.length} 个网站</Pill>}
       </div>
       <p className="text-xs text-muted-foreground">
         连接后面板会读出 1Panel 上的网站，显示在这里，并防止节点用到和网站相同的域名（只读，不会改 1Panel 的任何东西）。
@@ -970,9 +971,9 @@ function OnePanelCard({ target }: { target: string }) {
         </div>
       </div>
       {data.error && <ErrorBox>{data.error}</ErrorBox>}
-      {!!data.sites.length && (
+      {!!sites.length && (
         <div className="divide-y rounded-lg border text-xs">
-          {data.sites.map((x) => (
+          {sites.map((x) => (
             <div key={x.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2">
               <Dot tone={x.status === 'Running' ? 'ok' : 'off'} />
               <span className="font-mono">{x.domain}</span>

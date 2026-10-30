@@ -10,6 +10,7 @@ import { applyTheme, getTheme, type Theme } from '@/lib/theme'
 import { sendBeacon } from '@/lib/beacon'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/brand-mark'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { CommandPalette } from '@/components/command'
 import { ModeSwitch, useMode } from '@/lib/mode'
 import { Button } from '@/components/ui/button'
@@ -154,7 +155,7 @@ export function Layout() {
           <UserMenu />
         </header>
         <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6">
-          <Outlet />
+          <ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary>
         </main>
         <CommandPalette />
       </div>
@@ -189,7 +190,7 @@ export function SimpleLayout() {
         <ModeSwitch />
         <UserMenu />
       </header>
-      <main className="mx-auto max-w-[1600px] p-3 sm:p-4 md:p-8"><Outlet /></main>
+      <main className="mx-auto max-w-[1600px] p-3 sm:p-4 md:p-8"><ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary></main>
     </div>
   )
 }

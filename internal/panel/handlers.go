@@ -26,6 +26,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/logout", a.handleLogout)
 	m.HandleFunc("GET /api/me", a.handleMe)
 	m.HandleFunc("POST /api/beacon", a.handleBeacon)
+	m.HandleFunc("POST /api/client-error", a.auth("", a.handleClientError))
 	m.HandleFunc("GET /api/public/config", a.handlePublicConfig)
 	m.HandleFunc("GET /manifest.webmanifest", a.handleManifest)
 	m.HandleFunc("GET /ca.crt", a.handleCACert)

@@ -2,11 +2,30 @@ package panel
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// POST /api/client-error — a page crashed in the browser; the stack goes to the system
+// log (logread) so a blank page can be traced afterwards.
+func (a *App) handleClientError(w http.ResponseWriter, r *http.Request) {
+	if a.beacons.blocked("err:" + currentUser(r).Username) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	a.beacons.record("err:" + currentUser(r).Username)
+	var req struct {
+		Path, Message, Stack, Component, Agent string
+	}
+	_ = readJSON(r, &req)
+	clean := func(s string, n int) string { return strings.ReplaceAll(truncate(s, n), "\n", " ⏎ ") }
+	log.Printf("ui error: user=%s path=%s agent=%q msg=%q stack=%q at=%q", currentUser(r).Username, clean(req.Path, 200),
+		clean(req.Agent, 300), clean(req.Message, 500), clean(req.Stack, 2000), clean(req.Component, 1500))
+	w.WriteHeader(http.StatusNoContent)
+}
 
 // POST /api/beacon  (public) — the SPA sends this on every page load.
 // The server time is the access time; the browser reports its own clock and timezone.

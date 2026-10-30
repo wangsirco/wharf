@@ -198,12 +198,13 @@ func (a *App) onePanelState() map[string]any {
 	onePanel.Lock()
 	defer onePanel.Unlock()
 	key := a.setting("onepanel.key")
-	out := map[string]any{"url": a.setting("onepanel.url"), "key": maskSecret(key), "sites": onePanel.sites, "error": onePanel.err, "api": onePanel.ver}
+	sites := onePanel.sites
+	if sites == nil {
+		sites = []onePanelSite{}
+	}
+	out := map[string]any{"url": a.setting("onepanel.url"), "key": maskSecret(key), "sites": sites, "error": onePanel.err, "api": onePanel.ver}
 	if !onePanel.at.IsZero() {
 		out["fetched"] = onePanel.at.Unix()
-	}
-	if out["sites"] == nil {
-		out["sites"] = []onePanelSite{}
 	}
 	return out
 }

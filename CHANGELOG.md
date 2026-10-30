@@ -7,6 +7,7 @@
 - Proxy users with traffic limits, expiry, IP limits, subscriptions, QR codes; live dashboard, access records; `proxy.manage` permission · 代理用户、大屏、访问记录
 - Dynamic DNS with 9 providers, multi-WAN, IPv6, CNAME to an existing dynamic name · 动态域名 DDNS（含 CNAME）
 - Shared 443 next to an existing website forward: the forward stays untouched and the site keeps seeing real visitors (transparent hand-off); optional read-only 1Panel API link · 共用 443 不动原转发、网站仍见真实 IP；可连接 1Panel
+- A page that fails to render now shows the error (and logs it on the router) instead of a blank screen; fixed the proxy settings tab going blank before 1Panel was connected · 页面出错不再白屏；修复未连接 1Panel 时代理「扩展设置」白屏
 - Fix: the panel could show "无法连接面板" on devices that do not trust its certificate (the service worker is retired) · 修复部分设备提示无法连接面板
 
 ## 0.17.0 — first public release · 首个公开版本
