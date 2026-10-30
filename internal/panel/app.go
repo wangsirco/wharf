@@ -245,6 +245,7 @@ func (a *App) Start() {
 	go a.alertEngine()
 	go a.proxyLoop()
 	go a.ddnsLoop()
+	go a.onePanelLoop()
 	log.Printf("panel ready")
 }
 

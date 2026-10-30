@@ -108,6 +108,8 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/proxy/ext", a.super(a.handleProxyExt))
 	m.HandleFunc("POST /api/proxy/activate", a.super(a.handleProxyActivate))
 	m.HandleFunc("GET /api/proxy/log", a.super(a.handleProxyLog))
+	m.HandleFunc("GET /api/proxy/onepanel", a.super(a.handleOnePanel))
+	m.HandleFunc("POST /api/proxy/onepanel", a.super(a.handleOnePanelSave))
 	m.HandleFunc("GET /api/ddns", a.super(a.handleDDNS))
 	m.HandleFunc("POST /api/ddns", a.super(a.handleDDNSSave))
 	m.HandleFunc("DELETE /api/ddns/{id}", a.super(a.handleDDNSDelete))

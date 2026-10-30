@@ -166,3 +166,22 @@ func (l *loginLimiter) reset(keys ...string) {
 		delete(l.fail, k)
 	}
 }
+
+// SessionCLI signs the super admin in from the router's shell (root only: it needs the
+// database) and prints the cookie and CSRF token, for scripted setup over the API.
+// The session is short-lived and marked "cli" in the session list.
+func SessionCLI(a *App) (string, string, error) {
+	var uid int64
+	if err := a.db.QueryRow(`SELECT id FROM users WHERE role='super' AND disabled=0 ORDER BY id LIMIT 1`).Scan(&uid); err != nil {
+		return "", "", err
+	}
+	token, csrf := sign.RandomHex(32), sign.RandomHex(16)
+	now := time.Now().Unix()
+	// created_at is back-dated so the session ends within an hour whatever sessionMax is
+	created := now - int64(sessionMax.Seconds()) + 3600
+	if _, err := a.db.Exec(`INSERT INTO sessions(token_hash, user_id, csrf, ip, user_agent, created_at, seen_at) VALUES(?,?,?,?,?,?,?)`,
+		tokenHash(token), uid, csrf, "127.0.0.1", "owp-panel session (cli)", created, now); err != nil {
+		return "", "", err
+	}
+	return sessionCookie + "=" + token, csrf, nil
+}

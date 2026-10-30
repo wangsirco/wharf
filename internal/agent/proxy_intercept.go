@@ -21,11 +21,22 @@ import (
 //
 //	nat    PREROUTING -> owp_pxy:   -i <wan> -p tcp --dport 443 -m set ! --match-set owp_pxy_skip src -j REDIRECT --to-ports <front>
 //	filter INPUT      -> owp_pxyin: -p tcp --dport <front> -m conntrack --ctstate DNAT -j ACCEPT
+//
+// What the front passes on to the forward's server it sends from the visitor's own
+// address (IP_TRANSPARENT), so that server still sees real visitors. Its replies are
+// addressed to the visitor and would be forwarded to the WAN; they are marked and routed
+// to the local socket instead:
+//
+//	mangle PREROUTING -> owp_pxyt: -p tcp -s <server> --sport <port> -m socket --transparent -j MARK --set-xmark <mark>
+//	ip rule fwmark <mark> lookup <table>; ip route local 0.0.0.0/0 dev lo table <table>
 
 const (
 	pxyChain   = "owp_pxy"
 	pxyInChain = "owp_pxyin"
 	pxySkipSet = "owp_pxy_skip"
+	pxyTChain  = "owp_pxyt"
+	pxyMark    = "0x1000000/0x1000000" // clear of fw3, mwan3 (0x3f00) and OpenClash
+	pxyTable   = "207"
 )
 
 type ProxyIntercept struct {
@@ -33,6 +44,7 @@ type ProxyIntercept struct {
 	To   int      `json:"to"`   // the front's port
 	Skip []string `json:"skip"` // source CIDRs left to the existing forward
 	Devs []string `json:"devs"` // WAN devices
+	Back string   `json:"back"` // the forward's server (ip:port) the front connects to transparently
 }
 
 var devRe = regexp.MustCompile(`^[a-zA-Z0-9_.@-]{1,15}$`)
@@ -54,6 +66,11 @@ func (ic *ProxyIntercept) validate() error {
 	for _, c := range ic.Skip {
 		if _, err := netip.ParsePrefix(c); err != nil {
 			return fmt.Errorf("intercept: bad CIDR %q", c)
+		}
+	}
+	if ic.Back != "" {
+		if ap, err := netip.ParseAddrPort(ic.Back); err != nil || !ap.Addr().Is4() {
+			return fmt.Errorf("intercept: bad server %q", ic.Back)
 		}
 	}
 	return nil
@@ -89,6 +106,12 @@ func setIntercept(ic *ProxyIntercept) error {
 	restore("nat", pxyChain, nat)
 	lastInterceptSig = strings.Join(nat, "|")
 	restore("filter", pxyInChain, []string{fmt.Sprintf("-p tcp --dport %d -m conntrack --ctstate DNAT -j ACCEPT", ic.To)})
+	var mangle []string
+	if ap, err := netip.ParseAddrPort(ic.Back); err == nil {
+		mangle = append(mangle, fmt.Sprintf("-p tcp -s %s --sport %d -m socket --transparent -j MARK --set-xmark %s", ap.Addr(), ap.Port(), pxyMark))
+	}
+	restore("mangle", pxyTChain, mangle)
+	transparentRoute(len(mangle) > 0)
 	hookIntercept()
 	b2, _ := json.Marshal(ic)
 	return os.WriteFile(interceptFile(), b2, 0o600)
@@ -126,10 +149,28 @@ func hookIntercept() {
 	}
 	ensure("nat", "PREROUTING", pxyChain)
 	ensure("filter", "INPUT", pxyInChain)
+	ensure("mangle", "PREROUTING", pxyTChain)
+}
+
+// transparentRoute delivers the marked replies locally (the "local" route makes the
+// kernel hand them to the front's socket).
+func transparentRoute(on bool) {
+	_, _ = run(5*time.Second, "ip", "rule", "del", "fwmark", pxyMark, "lookup", pxyTable)
+	if !on {
+		_, _ = run(5*time.Second, "ip", "route", "flush", "table", pxyTable)
+		return
+	}
+	if _, err := run(5*time.Second, "ip", "rule", "add", "pref", pxyTable, "fwmark", pxyMark, "lookup", pxyTable); err != nil {
+		log.Printf("proxy: ip rule: %v", err)
+	}
+	if _, err := run(5*time.Second, "ip", "route", "replace", "local", "0.0.0.0/0", "dev", "lo", "table", pxyTable); err != nil {
+		log.Printf("proxy: ip route: %v", err)
+	}
 }
 
 func clearIntercept() {
-	for _, c := range [][3]string{{"nat", "PREROUTING", pxyChain}, {"filter", "INPUT", pxyInChain}} {
+	transparentRoute(false)
+	for _, c := range [][3]string{{"nat", "PREROUTING", pxyChain}, {"filter", "INPUT", pxyInChain}, {"mangle", "PREROUTING", pxyTChain}} {
 		for i := 0; i < 4; i++ { // in case it was hooked more than once
 			if _, err := run(5*time.Second, "iptables", "-w", "-t", c[0], "-D", c[1], "-j", c[2]); err != nil {
 				break

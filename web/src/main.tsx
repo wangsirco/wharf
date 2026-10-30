@@ -12,8 +12,8 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-// installable as an app ("add to home screen"); browsers refuse service workers on
-// an untrusted self-signed certificate, which is fine — the manifest still applies
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {})
+// no service worker: the manifest alone makes the panel installable, and an old worker
+// (≤ 0.18) could keep showing its offline page on devices that distrust the certificate
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {})
 }

@@ -20,11 +20,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,6 +34,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
@@ -40,9 +43,10 @@ import (
 )
 
 type Route struct {
-	SNI     []string `json:"sni"`
-	Backend string   `json:"backend"` // host:port of the Xray inbound
-	Proxy   bool     `json:"proxy"`   // send a PROXY protocol v2 header
+	SNI         []string `json:"sni"`
+	Backend     string   `json:"backend"` // host:port of the Xray inbound
+	Proxy       bool     `json:"proxy"`   // send a PROXY protocol v2 header
+	Transparent bool     `json:"-"`
 }
 
 type Site struct {
@@ -64,6 +68,13 @@ type Config struct {
 	// not for a node (or our own site domain) goes there unchanged instead of to the site.
 	Fallback      string `json:"fallback"`       // host:port
 	FallbackProxy bool   `json:"fallback_proxy"` // the server understands PROXY protocol v2
+	// FallbackTransparent connects to the fallback from the visitor's own address
+	// (IP_TRANSPARENT; the agent routes the replies back to this process), so that
+	// server keeps seeing real visitors without any change on its side.
+	FallbackTransparent bool `json:"fallback_transparent"`
+	// User to run as. Started as root, the front drops to it at once and keeps only
+	// CAP_NET_ADMIN (needed for transparent connects).
+	User string `json:"user"`
 }
 
 type front struct {
@@ -83,6 +94,11 @@ func Run(path string) error {
 	var cfg Config
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return err
+	}
+	if cfg.User != "" && os.Geteuid() == 0 {
+		if err := dropPrivileges(cfg.User); err != nil {
+			return fmt.Errorf("drop privileges: %w", err)
+		}
 	}
 	f := &front{cfg: cfg, routes: map[string]Route{}}
 	for _, r := range cfg.Routes {
@@ -195,7 +211,7 @@ func (f *front) handle(c net.Conn) {
 	if first[0] != 0x16 { // not TLS: answer like a web server would
 		_ = c.SetReadDeadline(time.Time{})
 		if f.cfg.Fallback != "" {
-			f.pipe(in, c, Route{Backend: f.cfg.Fallback, Proxy: f.cfg.FallbackProxy})
+			f.pipe(in, c, f.fallback())
 			return
 		}
 		f.serveHTTP(in)
@@ -221,7 +237,7 @@ func (f *front) handle(c net.Conn) {
 		return
 	}
 	if f.cfg.Fallback != "" && (f.cfg.Site.Domain == "" || name != f.cfg.Site.Domain) {
-		f.pipe(replay, c, Route{Backend: f.cfg.Fallback, Proxy: f.cfg.FallbackProxy})
+		f.pipe(replay, c, f.fallback())
 		return
 	}
 	tc := tls.Server(replay, &tls.Config{
@@ -247,10 +263,37 @@ func (f *front) siteCert(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return &f.self, nil
 }
 
+func (f *front) fallback() Route {
+	return Route{Backend: f.cfg.Fallback, Proxy: f.cfg.FallbackProxy, Transparent: f.cfg.FallbackTransparent}
+}
+
+var transparentOff sync.Once
+
+// dial connects to a backend; a transparent route uses the client's public address as
+// the source (LAN clients, and any failure, fall back to an ordinary connection).
+func dial(r Route, client net.Addr) (net.Conn, error) {
+	if ta, ok := client.(*net.TCPAddr); ok && r.Transparent {
+		if ip, ok := netip.AddrFromSlice(ta.IP); ok && ip.Unmap().Is4() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			up, err := transparentDialer(ip.Unmap()).Dial("tcp", r.Backend)
+			if err == nil {
+				return up, nil
+			}
+			if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+				transparentOff.Do(func() {
+					log.Printf("front: transparent connect not permitted (%v); visitors reach the server from the router's address", err)
+				})
+			} else if !errors.Is(err, syscall.EADDRNOTAVAIL) {
+				return nil, err
+			}
+		}
+	}
+	return net.DialTimeout("tcp", r.Backend, 5*time.Second)
+}
+
 // pipe hands a connection to an Xray inbound unchanged (plus PROXY v2 if asked).
 func (f *front) pipe(client net.Conn, raw net.Conn, r Route) {
 	defer client.Close()
-	up, err := net.DialTimeout("tcp", r.Backend, 5*time.Second)
+	up, err := dial(r, raw.RemoteAddr())
 	if err != nil {
 		return
 	}

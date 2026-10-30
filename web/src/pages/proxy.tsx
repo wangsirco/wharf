@@ -876,8 +876,8 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
               <p className="text-xs text-muted-foreground">想让节点也用 443（按域名分流）时，选择和这条转发怎么共处。只有存在「共用 443」的节点时才会生效。</p>
               <div className="grid gap-2">
                 {([
-                  ['cloudflare', '按来源分流（推荐：网站开了 Cloudflare 小云朵时）', `来自 Cloudflare 的连接照旧走原来的转发，一点不变，那台服务器看到的来源也和现在一样；其他来源的 443 交给分流器：节点的域名给 Xray，其余原样转给 ${data.port443.target}。原来的转发规则不改。`],
-                  ['takeover', '完全接管', `所有来源的 443 都先到分流器，节点以外的连接原样转给 ${data.port443.target}。原来的转发暂停（不需要时自动恢复）。那台服务器看到的来源会变成路由器，除非它接受 PROXY 协议。`],
+                  ['cloudflare', '共用 443（推荐）', `原来的转发规则一条不改，${data.port443.target} 上的网站和配置也不用动。来自 Cloudflare 的访问照旧直达；其他来源先经过分流器：节点的域名交给 Xray，其余域名原样转给 ${data.port443.target}，而且用访客自己的 IP 去连——网站看到的来源和以前完全一样。`],
+                  ...((s.share_443 === 'takeover' || s.takeover_443) ? [['takeover', '完全接管（旧方式）', `所有来源的 443 都先到分流器，原来的转发暂停。${data.port443.target} 看到的来源会变成路由器，除非它接受 PROXY 协议。建议改用「共用 443」。`] as const] : []),
                   ['', '不共用', '443 只给原来的转发；节点使用独立端口。'],
                 ] as const).map(([k, l, d]) => (
                   <label key={k} className={cn('flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm', (s.share_443 || (s.takeover_443 ? 'takeover' : '')) === k ? 'border-primary bg-accent' : 'hover:bg-muted')}>
@@ -887,7 +887,7 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
                 ))}
               </div>
               {s.share_443 === 'cloudflare' && (
-                <Field label="另外放行给原转发的来源（可选）" hint="一行一个 IPv4 地址或网段，例如你用来管理 1Panel 的固定 IP">
+                <Field label="另外直达原转发的来源（可选）" hint="一行一个 IPv4 地址或网段。一般不需要：经过分流器的访问，网站也能看到真实 IP">
                   <Textarea rows={2} value={(s.share_skip ?? []).join('\n')} onChange={(e) => set({ share_skip: e.target.value.split(/\n/).map((x) => x.trim()) })} className="font-mono text-xs" />
                 </Field>
               )}
@@ -899,6 +899,7 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
                   </span>
                 </label>
               )}
+              <OnePanelCard target={data.port443.target} />
             </div>
           )}
           <Field label="对外地址" hint={`客户端连接用的地址（域名或 IP）。留空 = 当前 WAN IP（${data.host || '未知'}）。有 DDNS 域名就填域名，IP 变了链接也不用换。`}>
@@ -928,6 +929,61 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
         </div>
       </Section>
       {dialog}
+    </div>
+  )
+}
+
+interface OnePanelSite { id: number; domain: string; domains: string[] | null; alias: string; status: string; protocol: string; remark: string }
+interface OnePanelState { url: string; key: string; sites: OnePanelSite[]; error: string; api: string; fetched?: number }
+
+// 1Panel: read-only API access to list the websites behind the 443 forward
+function OnePanelCard({ target }: { target: string }) {
+  const { data, reload } = useApi<OnePanelState>('/proxy/onepanel')
+  const [form, setForm] = useState<{ url: string; key: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!data) return null
+  const f = form ?? { url: data.url || `http://${target.replace(/:\d+$/, '')}:8888`, key: data.key }
+  const save = async (disconnect = false) => {
+    setBusy(true)
+    try {
+      await post('/proxy/onepanel', disconnect ? { url: '', key: '' } : f)
+      toast.success(disconnect ? '已断开 1Panel' : '已连接 1Panel')
+      setForm(null); reload()
+    } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="grid gap-3 rounded-lg border p-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        {target} 是 1Panel？
+        {data.url && !data.error && <Pill tone="green">已连接 · {data.sites.length} 个网站</Pill>}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        连接后面板会读出 1Panel 上的网站，显示在这里，并防止节点用到和网站相同的域名（只读，不会改 1Panel 的任何东西）。
+        在 1Panel「面板设置 → API 接口」开启，复制密钥，并把路由器的局域网地址加入 IP 白名单。
+      </p>
+      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <Input value={f.url} onChange={(e) => setForm({ ...f, url: e.target.value.trim() })} placeholder="http://192.168.1.10:8888" className="font-mono text-xs" />
+        <Input value={f.key} onChange={(e) => setForm({ ...f, key: e.target.value.trim() })} placeholder="API 密钥" type="password" autoComplete="off" className="font-mono text-xs" />
+        <div className="flex gap-1.5">
+          <Button size="sm" variant="outline" disabled={busy || !f.url || !f.key} onClick={() => save()}>{busy && <Loader2 className="animate-spin" />}{data.url ? '保存' : '连接'}</Button>
+          {data.url && <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(true)}>断开</Button>}
+        </div>
+      </div>
+      {data.error && <ErrorBox>{data.error}</ErrorBox>}
+      {!!data.sites.length && (
+        <div className="divide-y rounded-lg border text-xs">
+          {data.sites.map((x) => (
+            <div key={x.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2">
+              <Dot tone={x.status === 'Running' ? 'ok' : 'off'} />
+              <span className="font-mono">{x.domain}</span>
+              {x.protocol === 'HTTPS' && <Pill tone="green">HTTPS</Pill>}
+              {(x.remark || x.alias) && <span className="text-muted-foreground">{x.remark || x.alias}</span>}
+              {(x.domains ?? []).length > 1 && <span className="w-full truncate pl-4 font-mono text-muted-foreground">{(x.domains ?? []).filter((d) => d !== x.domain).join(' · ')}</span>}
+            </div>
+          ))}
+          <div className="px-3 py-2 text-muted-foreground">这些域名的访问一律交给 1Panel 处理，节点请用别的子域名。</div>
+        </div>
+      )}
     </div>
   )
 }

@@ -532,8 +532,9 @@ type frontSite struct {
 // frontFallback is where the front sends everything that is not for a node when it
 // has taken WAN 443 over from an existing port forward.
 type frontFallback struct {
-	Backend string
-	Proxy   bool
+	Backend     string
+	Proxy       bool
+	Transparent bool // connect from the client's own address (the server sees real visitors)
 }
 
 func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback) (string, bool) {
@@ -568,9 +569,10 @@ func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontF
 		"dir": "@PROXYDIR@", "listen": fmt.Sprintf(":%d", proxyFrontPort), "http_listen": fmt.Sprintf("127.0.0.1:%d", proxyHTTPPort),
 		"routes": routes, "acme": acme, "acme_email": acmeEmail,
 		"site": jm{"mode": site.Mode, "proxy": site.Proxy, "title": site.Title, "domain": site.Domain},
+		"user": "nobody", // started as root only to keep CAP_NET_ADMIN for transparent connects
 	}
 	if fb != nil && fb.Backend != "" {
-		cfg["fallback"], cfg["fallback_proxy"] = fb.Backend, fb.Proxy
+		cfg["fallback"], cfg["fallback_proxy"], cfg["fallback_transparent"] = fb.Backend, fb.Proxy, fb.Transparent
 	}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	return string(b), true

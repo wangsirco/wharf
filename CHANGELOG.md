@@ -5,7 +5,9 @@
 - Optional proxy extension: official Xray-core installed online and run as nobody; VLESS / REALITY / Vision / XHTTP / Trojan / VMess / SS2022 / Hysteria 2 · 代理扩展
 - Nodes linked to the firewall and port checks; shared 443 routed by SNI, optional takeover of an existing 443 forward; ACME certificates · 防火墙联动、443 分流、自动证书
 - Proxy users with traffic limits, expiry, IP limits, subscriptions, QR codes; live dashboard, access records; `proxy.manage` permission · 代理用户、大屏、访问记录
-- Dynamic DNS with 9 providers, multi-WAN, IPv6 · 动态域名 DDNS
+- Dynamic DNS with 9 providers, multi-WAN, IPv6, CNAME to an existing dynamic name · 动态域名 DDNS（含 CNAME）
+- Shared 443 next to an existing website forward: the forward stays untouched and the site keeps seeing real visitors (transparent hand-off); optional read-only 1Panel API link · 共用 443 不动原转发、网站仍见真实 IP；可连接 1Panel
+- Fix: the panel could show "无法连接面板" on devices that do not trust its certificate (the service worker is retired) · 修复部分设备提示无法连接面板
 
 ## 0.17.0 — first public release · 首个公开版本
 

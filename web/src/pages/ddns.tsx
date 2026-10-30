@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
-interface Source { mode: 'auto' | 'iface' | 'api'; iface: string; apis: string[] | null }
+interface Source { mode: 'auto' | 'iface' | 'api'; iface: string; apis: string[] | null; target?: string }
 interface Entry {
-  id: number; name: string; enabled: boolean; provider: string; creds: Record<string, string>; domain: string; rtype: 'A' | 'AAAA'
+  id: number; name: string; enabled: boolean; provider: string; creds: Record<string, string>; domain: string; rtype: 'A' | 'AAAA' | 'CNAME'
   source: Source; interval_min: number; on_change: boolean; ttl: number; proxied: boolean
   last_ip: string; last_ok: number; last_run: number; last_err: string; created: number
 }
@@ -24,6 +24,7 @@ type Form = Omit<Entry, 'id' | 'last_ip' | 'last_ok' | 'last_run' | 'last_err' |
 
 const blank: Form = { name: '', enabled: true, provider: 'cloudflare', creds: {}, domain: '', rtype: 'A', source: { mode: 'auto', iface: 'wan', apis: [] }, interval_min: 0, on_change: true, ttl: 300, proxied: false }
 
+const CNAME_OK = ['cloudflare', 'alidns', 'dnspod']
 const SOURCE: Record<string, string> = { auto: '自动（接口是公网 IP 就用接口，否则问公网服务）', iface: '只看 WAN 接口', api: '只问公网 IP 查询服务' }
 
 export default function DDNSPage() {
@@ -64,9 +65,11 @@ export default function DDNSPage() {
                     {!e.enabled && <Pill>已暂停</Pill>}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {e.last_ip ? <>当前 <span className="font-mono">{e.last_ip}</span> · {ago(e.last_ok)}更新</> : '还没有更新过'}
+                    {e.rtype === 'CNAME'
+                      ? <>指向 <span className="font-mono">{e.source.target}</span>{e.last_ok ? ` · ${ago(e.last_ok)}核对` : ' · 还没有写入'}</>
+                      : <>{e.last_ip ? <>当前 <span className="font-mono">{e.last_ip}</span> · {ago(e.last_ok)}更新</> : '还没有更新过'}
                     {' · '}{[e.on_change && 'IP 变化时', e.interval_min > 0 && `每 ${e.interval_min} 分钟`].filter(Boolean).join(' + ')}
-                    {e.source.mode !== 'api' && e.source.iface ? ` · 接口 ${e.source.iface}` : ''}
+                    {e.source.mode !== 'api' && e.source.iface ? ` · 接口 ${e.source.iface}` : ''}</>}
                   </div>
                   {e.last_err && <div className="truncate text-xs text-destructive">{e.last_err}</div>}
                 </button>
@@ -98,6 +101,7 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
   const setSrc = (p: Partial<Source>) => onChange({ ...v, source: { ...v.source, ...p } })
   const p = data.providers.find((x) => x.id === v.provider)
   const v6 = v.rtype === 'AAAA'
+  const cname = v.rtype === 'CNAME'
   const services = data.ip_services.filter((s) => s.v6 === v6)
   const apis = v.source.apis ?? []
   const save = async () => {
@@ -110,12 +114,12 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
   }
   return (
     <HalfPanel open={!!v} onOpenChange={(o) => { if (!o) { onChange(null); setDetect(null) } }} title={v.id ? `修改「${v.name || v.domain}」` : '添加域名'}
-      footer={<><Button variant="outline" onClick={() => onChange(null)}>取消</Button><Button disabled={!v.domain || busy} onClick={save}>{busy && <Loader2 className="animate-spin" />}保存</Button></>}>
+      footer={<><Button variant="outline" onClick={() => onChange(null)}>取消</Button><Button disabled={!v.domain || (cname && !v.source.target) || busy} onClick={save}>{busy && <Loader2 className="animate-spin" />}保存</Button></>}>
       <div className="grid gap-5">
         <Field label="服务商">
           <div className="grid gap-1.5 sm:grid-cols-2">
             {data.providers.map((x) => (
-              <button key={x.id} type="button" onClick={() => set({ provider: x.id, creds: {} })}
+              <button key={x.id} type="button" onClick={() => set({ provider: x.id, creds: {}, rtype: v.rtype === 'CNAME' && !CNAME_OK.includes(x.id) ? 'A' : v.rtype })}
                 className={cn('rounded-lg border px-3 py-2 text-left text-sm', v.provider === x.id ? 'border-primary bg-accent' : 'hover:bg-muted')}>{x.name}</button>
             ))}
           </div>
@@ -135,16 +139,21 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
           <Field label="域名" hint="完整的名字，几级都可以：home.example.com、a.b.example.com"><Input value={v.domain} onChange={(e) => set({ domain: e.target.value.trim().toLowerCase() })} placeholder="home.example.com" className="font-mono" /></Field>
           <Field label="记录类型">
             <div className="flex gap-1.5">
-              {(['A', 'AAAA'] as const).map((t) => (
+              {(CNAME_OK.includes(v.provider) ? ['A', 'AAAA', 'CNAME'] as const : ['A', 'AAAA'] as const).map((t) => (
                 <button key={t} type="button" onClick={() => onChange({ ...v, rtype: t, source: { ...v.source, apis: [], iface: t === 'AAAA' && v.source.iface === 'wan' ? 'wan6' : t === 'A' && v.source.iface === 'wan6' ? 'wan' : v.source.iface } })}
-                  className={cn('rounded-md border px-3 py-1.5 text-xs', v.rtype === t ? 'border-primary bg-accent' : 'text-muted-foreground hover:bg-muted')}>{t === 'A' ? 'A（IPv4）' : 'AAAA（IPv6）'}</button>
+                  className={cn('rounded-md border px-3 py-1.5 text-xs', v.rtype === t ? 'border-primary bg-accent' : 'text-muted-foreground hover:bg-muted')}>{t === 'A' ? 'A（IPv4）' : t === 'AAAA' ? 'AAAA（IPv6）' : 'CNAME（别名）'}</button>
               ))}
             </div>
           </Field>
         </div>
+        {cname && (
+          <Field label="指向（已有的动态域名）" hint="家里已经有别的设备在做 DDNS 时，新子域名直接 CNAME 到它，不用再管 IP。每天核对一次记录">
+            <Input value={v.source.target ?? ''} onChange={(e) => setSrc({ target: e.target.value.trim().toLowerCase() })} placeholder="home.example.net" className="font-mono" />
+          </Field>
+        )}
         <Field label="名称（可选）"><Input value={v.name} maxLength={40} onChange={(e) => set({ name: e.target.value })} placeholder={v.domain || '家里'} /></Field>
 
-        <div className="grid gap-3 rounded-xl border p-4">
+        {!cname && <><div className="grid gap-3 rounded-xl border p-4">
           <div className="text-sm font-medium">IP 从哪里来</div>
           <div className="grid gap-1.5">
             {Object.entries(SOURCE).map(([k, l]) => (
@@ -206,7 +215,7 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
               ))}
             </div>
           </Field>
-        </div>
+        </div></>}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="TTL（秒）" hint="阿里云 / DNSPod 免费版最低 600"><Input value={v.ttl} inputMode="numeric" onChange={(e) => set({ ttl: Number(e.target.value.replace(/\D/g, '')) || 0 })} /></Field>
           {v.provider === 'cloudflare' && (

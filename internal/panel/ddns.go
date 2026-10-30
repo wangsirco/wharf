@@ -37,7 +37,7 @@ type DDNS struct {
 	Provider string            `json:"provider"`
 	Creds    map[string]string `json:"creds"`
 	Domain   string            `json:"domain"`
-	RType    string            `json:"rtype"` // A | AAAA
+	RType    string            `json:"rtype"` // A | AAAA | CNAME
 	Source   DDNSSource        `json:"source"`
 	Interval int               `json:"interval_min"` // 0 = no timer
 	OnChange bool              `json:"on_change"`
@@ -54,6 +54,9 @@ type DDNSSource struct {
 	Mode  string   `json:"mode"`  // iface | api | auto (interface when its address is public, else the services)
 	Iface string   `json:"iface"` // logical interface (wan, wan6, wanb …)
 	APIs  []string `json:"apis"`  // service ids or custom http(s) URLs; tried in order
+	// Target of a CNAME record: an existing dynamic name (another DDNS client keeps
+	// it pointed at home), so a new subdomain needs no address of its own
+	Target string `json:"target,omitempty"`
 }
 
 type ddnsProvider struct {
@@ -182,8 +185,25 @@ func (d *DDNS) normalize() error {
 	if !hostnameOK(d.Domain) {
 		return errors.New("域名格式不对（例如 home.example.com）")
 	}
-	if d.RType != "AAAA" {
+	switch d.RType {
+	case "AAAA":
+	case "CNAME":
+		if !slices.Contains([]string{"cloudflare", "alidns", "dnspod"}, d.Provider) {
+			return errors.New("CNAME 记录目前支持 Cloudflare、阿里云、DNSPod")
+		}
+		d.Source.Target = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(d.Source.Target), "."))
+		if !hostnameOK(d.Source.Target) || d.Source.Target == d.Domain {
+			return errors.New("CNAME 指向的域名格式不对（例如 home.example.net）")
+		}
+		d.OnChange = false // nothing to watch: the target follows the address itself
+		if d.Interval == 0 {
+			d.Interval = 1440
+		}
+	default:
 		d.RType = "A"
+	}
+	if d.RType != "CNAME" {
+		d.Source.Target = ""
 	}
 	switch d.Source.Mode {
 	case "iface", "api", "auto":
@@ -581,6 +601,8 @@ func (a *App) ddnsLoop() {
 				continue
 			}
 			due := d.Interval > 0 && now.Unix()-d.LastRun >= int64(d.Interval)*60
+			// a CNAME is (re)written once its target changes; failures retry every 10 minutes
+			due = due || (d.RType == "CNAME" && d.LastIP != d.Source.Target && now.Unix()-d.LastRun >= 600*int64(min(len(d.LastErr), 1)))
 			// watching for changes: the interface every minute, public services every 5
 			if !due && d.OnChange {
 				every := time.Minute
@@ -606,7 +628,10 @@ func (a *App) ddnsLoop() {
 // runDDNS detects the address and updates the record when it changed (or force).
 func (a *App) runDDNS(d *DDNS, force bool) (string, string, error) {
 	now := time.Now().Unix()
-	ip, from, err := a.detectIP(d)
+	ip, from, err := d.Source.Target, "", error(nil)
+	if d.RType != "CNAME" {
+		ip, from, err = a.detectIP(d)
+	}
 	logIt := func(ok bool, msg string) {
 		_, _ = a.db.Exec(`INSERT INTO ddns_log(ddns_id, ts, ip, ok, msg) VALUES(?,?,?,?,?)`, d.ID, now, ip, ok, msg)
 		_, _ = a.db.Exec(`DELETE FROM ddns_log WHERE ddns_id=? AND id <= (SELECT id FROM ddns_log WHERE ddns_id=? ORDER BY id DESC LIMIT 1 OFFSET 300)`, d.ID, d.ID)

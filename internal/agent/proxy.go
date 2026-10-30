@@ -471,7 +471,8 @@ func testXray(bin, cfg string) error {
 }
 
 const proxyInitScript = `#!/bin/sh /etc/rc.common
-# Wharf proxy extension: Xray-core + SNI front, both as nobody.
+# Wharf proxy extension: Xray-core + SNI front, both as nobody (the front starts as root
+# and drops to nobody itself, keeping only CAP_NET_ADMIN for transparent connects).
 # Written by owp-agent; removed with the extension (or the panel).
 
 START=99
@@ -498,7 +499,6 @@ start_service() {
 		procd_open_instance front
 		procd_set_param command /usr/bin/owp-agent proxy-front -c "$f"
 		procd_set_param env WHARF_CFG="$(md5sum < "$f" | cut -c1-32)"
-		procd_set_param user nobody
 		procd_set_param limits nofile="65535 65535"
 		procd_set_param respawn 3600 5 0
 		procd_set_param stdout 1

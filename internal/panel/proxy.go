@@ -266,7 +266,8 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 	var fb *frontFallback
 	if mode != "" && len(owners443) > 0 {
 		r := fw[owners443[0]]
-		fb = &frontFallback{Backend: net.JoinHostPort(optStr(r, "dest_ip"), firstNonEmpty(optStr(r, "dest_port"), "443")), Proxy: mode == "takeover" && ps.TakeoverProxy}
+		fb = &frontFallback{Backend: net.JoinHostPort(optStr(r, "dest_ip"), firstNonEmpty(optStr(r, "dest_port"), "443")), Proxy: mode == "takeover" && ps.TakeoverProxy,
+			Transparent: mode == "cloudflare"}
 		// the front only keeps names it knows; give it the panel's address so the
 		// subscriptions stay reachable instead of going to the other server
 		if ps.Site.Domain == "" && hostnameOK(ps.Address) && !nodeName(nodes, ps.Address) && anySNI(nodes) {
@@ -279,7 +280,7 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 	}
 	var intercept *ProxyInterceptReq
 	if frontOn && fb != nil && mode == "cloudflare" {
-		intercept = &ProxyInterceptReq{Port: 443, To: proxyFrontPort, Skip: append(a.cloudflareCIDRs(), ps.ShareSkip...)}
+		intercept = &ProxyInterceptReq{Port: 443, To: proxyFrontPort, Skip: append(a.cloudflareCIDRs(), ps.ShareSkip...), Back: fb.Backend}
 		for _, w := range a.wans() {
 			if w.Device != "" && !slices.Contains(intercept.Devs, w.Device) {
 				intercept.Devs = append(intercept.Devs, w.Device)
@@ -339,6 +340,7 @@ type ProxyInterceptReq struct {
 	To   int      `json:"to"`
 	Skip []string `json:"skip"`
 	Devs []string `json:"devs"`
+	Back string   `json:"back"`
 }
 
 func anySNI(nodes []*ProxyNode) bool {
@@ -784,6 +786,13 @@ func (a *App) handleProxyActivate(w http.ResponseWriter, r *http.Request) {
 // ---- actions ----
 
 func (a *App) nodeIssues(u *User, n *ProxyNode, nodes []*ProxyNode) error {
+	if n.Enabled {
+		for _, d := range append(n.sniNames(), n.Domain) {
+			if site := onePanelOwner(d); d != "" && site != nil {
+				return fmt.Errorf("%s 是 1Panel 上的网站「%s」，节点请换一个子域名（例如 x.%s）", d, firstNonEmpty(site.Remark, site.Alias, site.Domain), parentDomain(d))
+			}
+		}
+	}
 	for _, o := range nodes {
 		if o.ID == n.ID || !o.Enabled || !n.Enabled {
 			continue

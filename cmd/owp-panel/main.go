@@ -85,6 +85,15 @@ func main() {
 		fmt.Println("ok")
 		return
 	}
+	if flag.Arg(0) == "session" { // owp-panel session  -> cookie + CSRF for one hour (root on the router only)
+		cookie, csrf, err := panel.SessionCLI(panel.NewApp(cfg, db, web.Dist()))
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(cookie)
+		fmt.Println(csrf)
+		return
+	}
 	if flag.Arg(0) == "reset-access" {
 		if err := panel.ResetAccess(panel.NewApp(cfg, db, web.Dist())); err != nil {
 			log.Fatal(err)
