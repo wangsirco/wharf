@@ -46,6 +46,18 @@ type proxySettings struct {
 	ShareSkip     []string `json:"share_skip"`     // more sources left to the forward ("cloudflare" mode)
 	Takeover443   bool     `json:"takeover_443"`   // (0.18 previews) = Share443 "takeover"
 	TakeoverProxy bool     `json:"takeover_proxy"` // send PROXY protocol v2 to that server (it must expect it)
+	// SharePort is the public port the front shares by SNI (0 = 443). Another port suits
+	// lines whose provider blocks 443; Let's Encrypt only validates on 443, so certificates
+	// are then self-signed (and pinned in the links).
+	SharePort int `json:"share_port"`
+}
+
+// port is the public port of the SNI-shared entry.
+func (s proxySettings) port() int {
+	if s.SharePort < 1 || s.SharePort > 65535 {
+		return 443
+	}
+	return s.SharePort
 }
 
 func (s proxySettings) share() string {
@@ -110,6 +122,12 @@ func (s *proxySettings) normalize() error {
 		return errors.New("共用 443 的方式不对")
 	}
 	s.Takeover443 = false
+	if s.SharePort == 443 {
+		s.SharePort = 0
+	}
+	if s.SharePort != 0 && (s.SharePort < 1 || s.SharePort > 65535) {
+		return errors.New("分流端口应为 1–65535")
+	}
 	var skip []string
 	for _, c := range s.ShareSkip {
 		if c = strings.TrimSpace(c); c == "" {
@@ -151,11 +169,13 @@ func (a *App) proxyNodes() ([]*ProxyNode, error) {
 	}
 	defer rows.Close()
 	out := []*ProxyNode{}
+	port := a.proxySettings().port()
 	for rows.Next() {
 		n, err := scanNode(rows)
 		if err != nil {
 			return nil, err
 		}
+		n.sharePort(port)
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -261,7 +281,8 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 	if err != nil {
 		return err
 	}
-	owners443 := wan443Forwards(fw, a.adopted443())
+	port := ps.port()
+	owners443 := wanPortForwards(fw, a.adopted443(), port)
 	mode := ps.share()
 	var fb *frontFallback
 	if mode != "" && len(owners443) > 0 {
@@ -274,13 +295,20 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 			ps.Site.Domain = ps.Address
 		}
 	}
-	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb)
+	if port != 443 {
+		for _, n := range nodes {
+			if n.Enabled && n.Security == "tls" && n.Params.Cert == "acme" {
+				return fmt.Errorf("分流端口是 %d（不是 443），Let's Encrypt 无法验证证书。请把节点「%s」的证书改成自签", port, n.Name)
+			}
+		}
+	}
+	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb, port == 443)
 	if frontOn && len(owners443) > 0 && mode == "" {
-		return fmt.Errorf("WAN 443 已转发给「%s」。要共用 443，请在「扩展设置」里选择共用方式，或者让节点用独立端口", displayRule(fw[owners443[0]], nil))
+		return fmt.Errorf("WAN %d 已转发给「%s」。要共用这个端口，请在「扩展设置」里选择共用方式，或者让节点用独立端口", port, displayRule(fw[owners443[0]], nil))
 	}
 	var intercept *ProxyInterceptReq
 	if frontOn && fb != nil && mode == "cloudflare" {
-		intercept = &ProxyInterceptReq{Port: 443, To: proxyFrontPort, Skip: append(a.cloudflareCIDRs(), ps.ShareSkip...), Back: fb.Backend}
+		intercept = &ProxyInterceptReq{Port: port, To: proxyFrontPort, Skip: append(a.cloudflareCIDRs(), ps.ShareSkip...), Back: fb.Backend}
 		for _, w := range a.wans() {
 			if w.Device != "" && !slices.Contains(intercept.Devs, w.Device) {
 				intercept.Devs = append(intercept.Devs, w.Device)
@@ -315,6 +343,9 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 			certs = append(certs, map[string]string{"domain": n.Domain})
 		}
 	}
+	if ps.Site.Domain != "" && port != 443 && !seen[ps.Site.Domain] { // no ACME: the subscription site needs a certificate too
+		certs = append(certs, map[string]string{"domain": ps.Site.Domain})
+	}
 	proxyApplyMu.Lock()
 	defer proxyApplyMu.Unlock()
 	if err := a.agent.Do("POST", "/v1/proxy/apply", map[string]any{"xray": xray, "front": front, "site": site, "certs": certs, "intercept": intercept}, nil); err != nil {
@@ -332,7 +363,7 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 		_ = a.agent.Do("POST", "/v1/proxy/apply", map[string]any{"xray": xray, "front": front, "site": site, "certs": certs, "intercept": intercept}, nil)
 	}
 	// with the source split the agent redirects 443 itself; the forward stays as it is
-	return a.syncProxyFirewall(nodes, frontOn && intercept == nil, frontOn && fb != nil && mode == "takeover")
+	return a.syncProxyFirewall(nodes, port, frontOn && intercept == nil, frontOn && fb != nil && mode == "takeover")
 }
 
 type ProxyInterceptReq struct {
@@ -401,9 +432,29 @@ func (a *App) refreshCloudflare() bool {
 	return true
 }
 
-// wan443Forwards lists the WAN port forwards (not ours) covering TCP 443 that are
-// enabled, or that the front disabled when it took the port over.
-func wan443Forwards(fw map[string]Section, adopted []string) []string {
+var fwFlavor struct {
+	sync.Mutex
+	v string
+}
+
+// firewallFlavor is the router's firewall: fw3 (iptables) or fw4 (nftables).
+func (a *App) firewallFlavor() string {
+	fwFlavor.Lock()
+	defer fwFlavor.Unlock()
+	if fwFlavor.v == "" {
+		var sys struct {
+			Firewall string `json:"firewall"`
+		}
+		if a.agent.Do("GET", "/v1/system", nil, &sys) == nil && sys.Firewall != "" {
+			fwFlavor.v = sys.Firewall
+		}
+	}
+	return firstNonEmpty(fwFlavor.v, "fw3")
+}
+
+// wanPortForwards lists the WAN port forwards (not ours) covering a TCP port (the shared
+// entry, normally 443) that are enabled, or that the front disabled when it took the port over.
+func wanPortForwards(fw map[string]Section, adopted []string, port int) []string {
 	var out []string
 	for id, s := range fw {
 		if strings.HasPrefix(id, "owpx_") || !isWanRedirect(s) {
@@ -412,7 +463,7 @@ func wan443Forwards(fw map[string]Section, adopted []string) []string {
 		if optStr(s, "enabled") == "0" && !slices.Contains(adopted, id) && optStr(s, "wharf_adopted") != "1" {
 			continue
 		}
-		if lo, hi, ok := portRange(optStr(s, "src_dport")); ok && lo <= 443 && 443 <= hi && protoOverlap("tcp", optStr(s, "proto")) && optStr(s, "dest_ip") != "" {
+		if lo, hi, ok := portRange(optStr(s, "src_dport")); ok && lo <= port && port <= hi && protoOverlap("tcp", optStr(s, "proto")) && optStr(s, "dest_ip") != "" {
 			out = append(out, id)
 		}
 	}
@@ -444,7 +495,7 @@ func (a *App) proxyPins() map[string]string {
 // to the front through the firewall). With takeover,
 // the port forward that owned WAN 443 is switched off while the front holds the port and
 // switched back on when it lets go.
-func (a *App) syncProxyFirewall(nodes []*ProxyNode, frontOn, takeover bool) error {
+func (a *App) syncProxyFirewall(nodes []*ProxyNode, port int, frontOn, takeover bool) error {
 	fw, err := a.agent.UciConfig("firewall")
 	if err != nil {
 		return err
@@ -457,7 +508,7 @@ func (a *App) syncProxyFirewall(nodes []*ProxyNode, frontOn, takeover bool) erro
 	want := map[string]map[string]any{}
 	owners := map[string]int64{}
 	if frontOn {
-		want[frontSection] = map[string]any{"name": "Wharf 代理 · 443 分流", "src": "wan", "proto": "tcp", "src_dport": "443",
+		want[frontSection] = map[string]any{"name": fmt.Sprintf("Wharf 代理 · %d 分流", port), "src": "wan", "proto": "tcp", "src_dport": strconv.Itoa(port),
 			"dest_port": strconv.Itoa(proxyFrontPort), "target": "DNAT"}
 	}
 	for _, n := range nodes {
@@ -466,7 +517,7 @@ func (a *App) syncProxyFirewall(nodes []*ProxyNode, frontOn, takeover bool) erro
 		}
 		r := map[string]any{"name": "Wharf 代理 · " + n.Name, "src": "wan", "proto": n.fwProto(), "src_dport": strconv.Itoa(n.Port),
 			"dest_port": strconv.Itoa(n.inner()), "target": "DNAT"}
-		if dev := devOf[n.Wan]; n.Wan != "" && dev != "" {
+		if dev := devOf[n.Wan]; n.Wan != "" && dev != "" && a.firewallFlavor() != "fw4" { // fw4 has no "extra"
 			r["extra"] = "-i " + dev
 		}
 		want[nodeSection(n.ID)] = r
@@ -474,7 +525,7 @@ func (a *App) syncProxyFirewall(nodes []*ProxyNode, frontOn, takeover bool) erro
 	}
 	var changes []UciChange
 	var nowAdopted []string
-	for _, id := range wan443Forwards(fw, adopted) {
+	for _, id := range wanPortForwards(fw, adopted, port) {
 		r := fw[id]
 		if takeover {
 			nowAdopted = append(nowAdopted, id)
@@ -623,11 +674,11 @@ func (a *App) handleProxy(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"ext": ext, "nodes": nodes, "users": users, "host": a.proxyHost(ps),
 		"quota": map[string]any{"nodes": u.Quota("max_proxy_nodes"), "users": u.Quota("max_proxy_users")},
-		"front": map[string]any{"port": proxyFrontPort, "site_domain": ps.Site.Domain},
+		"front": map[string]any{"port": proxyFrontPort, "site_domain": ps.Site.Domain, "share_port": ps.port(), "firewall": a.firewallFlavor()},
 	}
 	if u.Role == RoleSuper {
 		if fw, err := a.agent.UciConfig("firewall"); err == nil {
-			if ids := wan443Forwards(fw, a.adopted443()); len(ids) > 0 {
+			if ids := wanPortForwards(fw, a.adopted443(), ps.port()); len(ids) > 0 {
 				r := fw[ids[0]]
 				out["port443"] = map[string]any{"forward": displayRule(r, nil), "target": net.JoinHostPort(optStr(r, "dest_ip"), firstNonEmpty(optStr(r, "dest_port"), "443")),
 					"adopted": slices.Contains(a.adopted443(), ids[0])}
@@ -757,7 +808,7 @@ func (a *App) handleProxyExt(w http.ResponseWriter, r *http.Request) {
 	case "uninstall":
 		// close the WAN ports first, then remove the core; nodes and users stay in the
 		// database so a reinstall picks up where it left off
-		if err := a.syncProxyFirewall(nil, false, false); err != nil {
+		if err := a.syncProxyFirewall(nil, 443, false, false); err != nil {
 			jsonErr(w, 502, err.Error())
 			return
 		}
@@ -818,7 +869,8 @@ func (a *App) nodeIssues(u *User, n *ProxyNode, nodes []*ProxyNode) error {
 			}
 		}
 	}
-	if n.Entry == "sni" && n.Enabled && a.proxySettings().share() == "" {
+	if ps := a.proxySettings(); n.Entry == "sni" && n.Enabled && ps.share() == "" {
+		port := ps.port()
 		st, err := a.loadFwState()
 		if err != nil {
 			return err
@@ -827,8 +879,8 @@ func (a *App) nodeIssues(u *User, n *ProxyNode, nodes []*ProxyNode) error {
 			if id == frontSection || !isWanRedirect(s) || optStr(s, "enabled") == "0" {
 				continue
 			}
-			if lo, hi, ok := portRange(optStr(s, "src_dport")); ok && lo <= 443 && 443 <= hi && protoOverlap("tcp", optStr(s, "proto")) {
-				return fmt.Errorf("WAN 443 已转发给「%s」。可以在「扩展设置」里选择共用 443 的方式（网站照常访问，节点按域名分流），或者让这个节点用独立端口", displayRule(s, st.owp[id]))
+			if lo, hi, ok := portRange(optStr(s, "src_dport")); ok && lo <= port && port <= hi && protoOverlap("tcp", optStr(s, "proto")) {
+				return fmt.Errorf("WAN %d 已转发给「%s」。可以在「扩展设置」里选择共用这个端口的方式（网站照常访问，节点按域名分流），或者让这个节点用独立端口", port, displayRule(s, st.owp[id]))
 			}
 		}
 	}
@@ -896,6 +948,7 @@ func prepareProxyNode(a *App, u *User, raw json.RawMessage) (string, error) {
 	if err := n.normalize(); err != nil {
 		return "", err
 	}
+	n.sharePort(a.proxySettings().port())
 	if err := a.nodeIssues(u, &n, nodes); err != nil {
 		return "", err
 	}
@@ -916,7 +969,7 @@ func nodeDesc(n *ProxyNode) string {
 	}
 	entry := fmt.Sprintf("WAN %d", n.Port)
 	if n.Entry == "sni" {
-		entry = "443 分流 · " + strings.Join(n.sniNames(), ",")
+		entry = fmt.Sprintf("%d 分流 · ", n.Port) + strings.Join(n.sniNames(), ",")
 	}
 	return strings.Join(parts, " + ") + " · " + entry
 }
@@ -949,6 +1002,7 @@ func runProxyNode(a *App, ac actor, raw json.RawMessage) (any, error) {
 	if err := n.normalize(); err != nil {
 		return nil, err
 	}
+	n.sharePort(a.proxySettings().port())
 	n.Updated = time.Now().Unix()
 	if err := saveNode(a.db, &n); err != nil {
 		return nil, err
@@ -1379,10 +1433,13 @@ func (a *App) handleProxyLinks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, l)
 	}
 	sub, selfSigned := "", false
-	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil); on {
+	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil, ps.port() == 443); on {
 		subHost := firstNonEmpty(ps.Site.Domain, host)
 		sub = "https://" + subHost + "/sub/" + p.SubToken
-		selfSigned = net.ParseIP(subHost) != nil // a name gets a public certificate
+		if ps.port() != 443 {
+			sub = "https://" + hostPort(subHost, ps.port()) + "/sub/" + p.SubToken
+		}
+		selfSigned = net.ParseIP(subHost) != nil || ps.port() != 443 // a name gets a public certificate on 443
 	}
 	writeJSON(w, 200, map[string]any{"links": out, "subscription": sub, "self_signed_sub": selfSigned})
 }

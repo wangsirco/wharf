@@ -29,6 +29,11 @@ import (
 //
 //	mangle PREROUTING -> owp_pxyt: -p tcp -s <server> --sport <port> -m socket --transparent -j MARK --set-xmark <mark>
 //	ip rule fwmark <mark> lookup <table>; ip route local 0.0.0.0/0 dev lo table <table>
+//
+// fw4 (nftables) gets the same in a table of its own (ip wharf_pxy, see nftIntercept),
+// which fw4 reloads leave alone. Its redirect runs just before fw4's dstnat, and the
+// replies are recognised by a connection mark the front's own connections get on the way
+// out (no socket match module needed).
 
 const (
 	pxyChain   = "owp_pxy"
@@ -37,6 +42,7 @@ const (
 	pxyTChain  = "owp_pxyt"
 	pxyMark    = "0x1000000/0x1000000" // clear of fw3, mwan3 (0x3f00) and OpenClash
 	pxyTable   = "207"
+	nftTable   = "wharf_pxy" // fw4: table ip wharf_pxy
 )
 
 type ProxyIntercept struct {
@@ -84,11 +90,11 @@ func setIntercept(ic *ProxyIntercept) error {
 		_ = os.Remove(interceptFile())
 		return nil
 	}
-	if FirewallFlavor() == "fw4" {
-		return errors.New("按来源共用 443 目前只支持 fw3（iptables）防火墙")
-	}
 	if err := ic.validate(); err != nil {
 		return err
+	}
+	if FirewallFlavor() == "fw4" {
+		return setInterceptNft(ic)
 	}
 	var b strings.Builder
 	tmp := pxySkipSet + "_n"
@@ -168,7 +174,73 @@ func transparentRoute(on bool) {
 	}
 }
 
+// setInterceptNft loads the whole table in one nft transaction (all or nothing).
+func setInterceptNft(ic *ProxyIntercept) error {
+	uid, _ := nobody()
+	rules := nftIntercept(ic, wanAddrs(ic.Devs), uid)
+	if _, err := runIn(20*time.Second, rules, "nft", "-f", "-"); err != nil {
+		return fmt.Errorf("nftables：%v", err)
+	}
+	lastInterceptSig = rules
+	transparentRoute(ic.Back != "")
+	b, _ := json.Marshal(ic)
+	return os.WriteFile(interceptFile(), b, 0o600)
+}
+
+// wanAddrs are the IPv4 addresses on the WAN devices (for the LAN-to-WAN-address rule).
+func wanAddrs(devs []string) map[string][]string {
+	out := map[string][]string{}
+	for _, d := range devs {
+		if ifc, err := net.InterfaceByName(d); err == nil {
+			addrs, _ := ifc.Addrs()
+			for _, a := range addrs {
+				if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil {
+					out[d] = append(out[d], ipn.IP.String())
+				}
+			}
+		}
+	}
+	return out
+}
+
+// nftIntercept is the fw4 ruleset: the source split, and the transparent replies.
+func nftIntercept(ic *ProxyIntercept, addrs map[string][]string, uid int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "table ip %s\ndelete table ip %s\ntable ip %s {\n", nftTable, nftTable, nftTable)
+	b.WriteString("\tset skip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n")
+	var skip []string
+	for _, c := range ic.Skip {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
+			skip = append(skip, p.Masked().String())
+		}
+	}
+	if len(skip) > 0 {
+		fmt.Fprintf(&b, "\t\telements = { %s }\n", strings.Join(skip, ", "))
+	}
+	b.WriteString("\t}\n")
+	b.WriteString("\tchain dstnat {\n\t\ttype nat hook prerouting priority dstnat - 10; policy accept;\n")
+	for _, d := range ic.Devs {
+		fmt.Fprintf(&b, "\t\tiifname %q tcp dport %d ip saddr != @skip redirect to :%d\n", d, ic.Port, ic.To)
+		for _, a := range addrs[d] {
+			fmt.Fprintf(&b, "\t\tiifname != %q ip daddr %s tcp dport %d redirect to :%d\n", d, a, ic.Port, ic.To)
+		}
+	}
+	b.WriteString("\t}\n")
+	if ap, err := netip.ParseAddrPort(ic.Back); err == nil {
+		mark := strings.SplitN(pxyMark, "/", 2)[0]
+		fmt.Fprintf(&b, "\tchain mark_out {\n\t\ttype route hook output priority mangle; policy accept;\n"+
+			"\t\tip daddr %s tcp dport %d meta skuid %d ct mark set ct mark | %s\n\t}\n", ap.Addr(), ap.Port(), uid, mark)
+		fmt.Fprintf(&b, "\tchain mark_in {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n"+
+			"\t\tip saddr %s tcp sport %d ct mark and %s == %s meta mark set meta mark | %s\n\t}\n", ap.Addr(), ap.Port(), mark, mark, mark)
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
 func clearIntercept() {
+	if FirewallFlavor() == "fw4" {
+		_, _ = run(5*time.Second, "nft", "delete", "table", "ip", nftTable)
+	}
 	transparentRoute(false)
 	for _, c := range [][3]string{{"nat", "PREROUTING", pxyChain}, {"filter", "INPUT", pxyInChain}, {"mangle", "PREROUTING", pxyTChain}} {
 		for i := 0; i < 4; i++ { // in case it was hooked more than once
@@ -192,7 +264,14 @@ func keepIntercept(full bool) {
 	if json.Unmarshal(b, &ic) != nil {
 		return
 	}
-	if !full && strings.Join(interceptRules(&ic), "|") == lastInterceptSig { // the WAN address did not change
+	if FirewallFlavor() == "fw4" {
+		uid, _ := nobody()
+		if !full && nftIntercept(&ic, wanAddrs(ic.Devs), uid) == lastInterceptSig {
+			if _, err := run(5*time.Second, "nft", "list", "table", "ip", nftTable); err == nil {
+				return
+			}
+		}
+	} else if !full && strings.Join(interceptRules(&ic), "|") == lastInterceptSig { // the WAN address did not change
 		hookIntercept()
 		return
 	}

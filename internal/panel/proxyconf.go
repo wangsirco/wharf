@@ -284,6 +284,13 @@ func (n *ProxyNode) normalize() error {
 	return nil
 }
 
+// sharePort puts an SNI-shared node on the extension's shared public port (stored as 443).
+func (n *ProxyNode) sharePort(port int) {
+	if n.Entry == "sni" {
+		n.Port = port
+	}
+}
+
 // sniNames are the names the front routes to this node.
 func (n *ProxyNode) sniNames() []string {
 	if n.Entry != "sni" {
@@ -537,7 +544,8 @@ type frontFallback struct {
 	Transparent bool // connect from the client's own address (the server sees real visitors)
 }
 
-func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback) (string, bool) {
+// acmeOK: the shared port is 443, where Let's Encrypt can validate (TLS-ALPN-01).
+func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback, acmeOK bool) (string, bool) {
 	type route struct {
 		SNI     []string `json:"sni"`
 		Backend string   `json:"backend"`
@@ -564,6 +572,9 @@ func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontF
 	}
 	if !need && len(acme) == 0 {
 		return "", false
+	}
+	if !acmeOK {
+		acme = nil
 	}
 	cfg := jm{
 		"dir": "@PROXYDIR@", "listen": fmt.Sprintf(":%d", proxyFrontPort), "http_listen": fmt.Sprintf("127.0.0.1:%d", proxyHTTPPort),

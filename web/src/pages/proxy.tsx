@@ -47,11 +47,12 @@ interface Settings {
   address: string; site: { mode: 'builtin' | 'html' | 'proxy'; proxy: string; title: string; domain: string }
   acme_email: string; block_bt: boolean; block_ports: number[] | null; block_hosts: string[] | null; access_days: number
   share_443: '' | 'cloudflare' | 'takeover'; share_skip: string[] | null; takeover_443?: boolean; takeover_proxy: boolean
+  share_port?: number
 }
 interface Cert { domain: string; issuer: string; not_after: number; self_signed: boolean; status?: string }
 interface ProxyResp {
   ext: Ext; nodes: PNode[]; users: PUser[]; host: string; quota: { nodes: number; users: number }
-  front: { port: number; site_domain: string }; settings?: Settings; site_html?: string; certs?: Cert[] | null
+  front: { port: number; site_domain: string; share_port?: number; firewall?: string }; settings?: Settings; site_html?: string; certs?: Cert[] | null
   port443?: { forward: string; target: string; adopted: boolean }
 }
 interface Rate { up: number; down: number }
@@ -75,7 +76,7 @@ function nodeDesc(n: PNode) {
   if (n.params.flow) parts.push('Vision')
   return parts.join(' + ')
 }
-const entryDesc = (n: PNode) => (n.entry === 'sni' ? `443 分流 · ${n.security === 'reality' ? (n.params.server_names ?? []).join(', ') : n.domain}` : `${n.wan ? n.wan + ':' : ''}${n.port}${n.protocol === 'hysteria' ? ' UDP' : n.protocol === 'shadowsocks' ? ' TCP+UDP' : ''}`)
+const entryDesc = (n: PNode) => (n.entry === 'sni' ? `${n.port} 分流 · ${n.security === 'reality' ? (n.params.server_names ?? []).join(', ') : n.domain}` : `${n.wan ? n.wan + ':' : ''}${n.port}${n.protocol === 'hysteria' ? ' UDP' : n.protocol === 'shadowsocks' ? ' TCP+UDP' : ''}`)
 
 const userState = (u: PUser): [string, 'green' | 'amber' | 'red' | 'muted'] => {
   if (!u.enabled) return ['已停用', 'muted']
@@ -107,7 +108,7 @@ export default function ProxyPage() {
   const xrayUp = data.ext.running.xray
   return (
     <>
-      <PageHeader title="代理" desc={`Xray ${data.ext.version} · ${xrayUp ? '运行中' : data.nodes.some((n) => n.enabled) ? '未运行' : '没有启用的节点'}${data.ext.running.front ? ' · 443 分流运行中' : ''}`}>
+      <PageHeader title="代理" desc={`Xray ${data.ext.version} · ${xrayUp ? '运行中' : data.nodes.some((n) => n.enabled) ? '未运行' : '没有启用的节点'}${data.ext.running.front ? ` · ${data.front.share_port ?? 443} 分流运行中` : ''}`}>
         <Tabs value={tab} onValueChange={(v) => pick(String(v))}>
           <TabsList>{tabs.map(([k, l]) => <TabsTrigger key={k} value={k} className="px-3">{l}</TabsTrigger>)}</TabsList>
         </Tabs>
@@ -396,7 +397,7 @@ function Nodes({ data, reload }: { data: ProxyResp; reload: () => void }) {
                   <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEdit({ ...n, params: { ...n.params } })}>
                     <div className="flex items-center gap-1.5 text-sm font-medium">
                       <span className="truncate">{n.name}</span>
-                      {n.entry === 'sni' ? <Pill tone="blue">443 分流</Pill> : <Pill>端口 {n.port}</Pill>}
+                      {n.entry === 'sni' ? <Pill tone="blue">{n.port} 分流</Pill> : <Pill>端口 {n.port}</Pill>}
                       {isSuper && n.owner_id !== user?.id && n.owner_name && <Pill>{n.owner_name}</Pill>}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">{nodeDesc(n)} · {entryDesc(n)}{n.note ? ` · ${n.note}` : ''}</div>
@@ -433,10 +434,13 @@ function NodeEditor({ value: v, onChange, data, onSaved }: { value: NodeForm | n
   const [busy, setBusy] = useState(false)
   const set = (p: Partial<NodeForm>) => v && onChange({ ...v, ...p })
   const setP = (p: Partial<Params>) => v && onChange({ ...v, params: { ...v.params, ...p } })
+  const sharePort = data.front.share_port ?? 443
   const save = async () => {
     if (!v) return
     setBusy(true)
-    try { if (await runAction('proxy.node.save', v)) onSaved() } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+    // off 443 Let's Encrypt cannot validate: TLS nodes use a self-signed (pinned) certificate
+    const body = sharePort !== 443 && v.security === 'tls' && v.params.cert !== 'self' ? { ...v, params: { ...v.params, cert: 'self' as const } } : v
+    try { if (await runAction('proxy.node.save', body)) onSaved() } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
   if (!v) return <HalfPanel open={false} onOpenChange={() => {}} title=""><div /></HalfPanel>
   const p = v.params
@@ -477,8 +481,8 @@ function NodeEditor({ value: v, onChange, data, onSaved }: { value: NodeForm | n
         <Field label="安全层"><Choice value={v.security} options={securities} onChange={(s) => set({ security: s, entry: s === 'none' ? 'port' : v.entry })} /></Field>
         <Field label="传输方式"><Choice value={v.transport} options={transports} onChange={(t) => set({ transport: t })} /></Field>
 
-        <Field label="入口" hint={v.entry === 'sni' ? `公网 443 端口由面板的分流器按域名（SNI）分给各个节点，不认识的访问会看到一个普通网站。不影响路由器自己的网页（内网 443 照常）。` : '节点单独占用一个公网端口，防火墙会自动放行'}>
-          <Choice value={v.entry} options={[['sni', '共用 443（按域名分流）'], ['port', '独立端口']]} onChange={(e) => set({ entry: e as 'sni' | 'port' })} disabled={(e) => e === 'sni' && !canSNI} />
+        <Field label="入口" hint={v.entry === 'sni' ? `公网 ${sharePort} 端口由面板的分流器按域名（SNI）分给各个节点，不认识的访问会看到一个普通网站。不影响路由器自己的网页（内网 443 照常）。` : '节点单独占用一个公网端口，防火墙会自动放行'}>
+          <Choice value={v.entry} options={[['sni', `共用 ${sharePort}（按域名分流）`], ['port', '独立端口']]} onChange={(e) => set({ entry: e as 'sni' | 'port' })} disabled={(e) => e === 'sni' && !canSNI} />
         </Field>
         {v.entry === 'port' && (
           <div className="flex flex-wrap gap-3">
@@ -510,9 +514,11 @@ function NodeEditor({ value: v, onChange, data, onSaved }: { value: NodeForm | n
               <Input value={v.domain} onChange={(e) => set({ domain: e.target.value.trim().toLowerCase() })} placeholder="proxy.example.com" />
             </Field>
             <Field label="证书">
-              <Choice value={p.cert ?? 'acme'} options={[['acme', "自动申请 Let's Encrypt"], ['self', '自签名（客户端需允许不安全证书）']]} onChange={(c) => setP({ cert: c as 'acme' | 'self' })} />
+              <Choice value={sharePort !== 443 ? 'self' : p.cert ?? 'acme'} options={[['acme', "自动申请 Let's Encrypt"], ['self', '自签名（客户端需允许不安全证书）']]} onChange={(c) => setP({ cert: c as 'acme' | 'self' })}
+                disabled={(c) => c === 'acme' && sharePort !== 443} />
             </Field>
-            {p.cert !== 'self' && <p className="text-xs text-muted-foreground">证书通过公网 443 端口自动验证和续期（TLS-ALPN），不需要开放 80 端口。第一次申请通常 1 分钟内完成；完成前会先用临时证书。</p>}
+            {sharePort !== 443 && <p className="text-xs text-muted-foreground">分流端口是 {sharePort}，Let's Encrypt 只在 443 上验证，所以只能用自签证书；导入链接会带上证书指纹，客户端照样能校验。</p>}
+            {p.cert !== 'self' && sharePort === 443 && <p className="text-xs text-muted-foreground">证书通过公网 443 端口自动验证和续期（TLS-ALPN），不需要开放 80 端口。第一次申请通常 1 分钟内完成；完成前会先用临时证书。</p>}
           </div>
         )}
         {['ws', 'xhttp', 'httpupgrade', 'grpc'].includes(v.transport) && (
@@ -842,7 +848,7 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
           <div className="grid gap-3 p-4">
             <div className="flex flex-wrap gap-2 text-xs">
               <Pill tone={ext.running.xray ? 'green' : 'muted'}><Server className="size-3" />Xray {ext.running.xray ? '运行中' : '未运行'}</Pill>
-              <Pill tone={ext.running.front ? 'green' : 'muted'}><Zap className="size-3" />443 分流 {ext.running.front ? '运行中' : '未运行'}</Pill>
+              <Pill tone={ext.running.front ? 'green' : 'muted'}><Zap className="size-3" />{data.front.share_port ?? 443} 分流 {ext.running.front ? '运行中' : '未运行'}</Pill>
               <button type="button" className="text-muted-foreground underline" onClick={() => setShowLog(!showLog)}>{showLog ? '收起日志' : '查看错误日志'}</button>
             </div>
             {showLog && <div className="max-h-56 overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-[11px] leading-5">{(log?.error ?? []).length ? log!.error!.map((l, i) => <div key={i}>{l}</div>) : '（没有错误）'}</div>}
@@ -872,7 +878,7 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
         <div className="grid gap-5 p-4">
           {data.port443 && (
             <div className="grid gap-3 rounded-xl border border-warning/50 p-4">
-              <div className="text-sm font-medium">公网 443 已经转发给「{data.port443.forward}」（{data.port443.target}）</div>
+              <div className="text-sm font-medium">公网 {data.front.share_port ?? 443} 已经转发给「{data.port443.forward}」（{data.port443.target}）</div>
               <p className="text-xs text-muted-foreground">想让节点也用 443（按域名分流）时，选择和这条转发怎么共处。只有存在「共用 443」的节点时才会生效。</p>
               <div className="grid gap-2">
                 {([
@@ -904,6 +910,16 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
           )}
           <Field label="对外地址" hint={`客户端连接用的地址（域名或 IP）。留空 = 当前 WAN IP（${data.host || '未知'}）。有 DDNS 域名就填域名，IP 变了链接也不用换。`}>
             <Input value={s.address} onChange={(e) => set({ address: e.target.value.trim() })} placeholder={data.host} />
+          </Field>
+          <Field label="分流端口" hint="多个节点按域名（SNI）共用的公网端口，默认 443。宽带运营商封了 443，或者想把 443 完全留给别的服务时，可以换成 8443、2053 这类端口——证书会改用自签（导入链接自带指纹），订阅链接也会带上端口。">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input className="w-28" inputMode="numeric" value={s.share_port || 443}
+                onChange={(e) => { const n = parseInt(e.target.value.replace(/\D/g, ''), 10); set({ share_port: Number.isFinite(n) ? n : 443 }) }} />
+              {[443, 8443, 2053, 2083].map((p) => (
+                <button key={p} type="button" onClick={() => set({ share_port: p })}
+                  className={cn('rounded-md border px-2 py-1 text-xs', (s.share_port || 443) === p ? 'border-primary bg-accent' : 'text-muted-foreground hover:bg-muted')}>{p}</button>
+              ))}
+            </div>
           </Field>
           <div className="grid gap-4 rounded-xl border p-4">
             <div className="text-sm font-medium">伪装网站</div>

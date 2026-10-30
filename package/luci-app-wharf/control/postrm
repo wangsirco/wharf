@@ -20,6 +20,7 @@ iptables -w -D INPUT -j owp_pxyin 2>/dev/null; iptables -w -F owp_pxyin 2>/dev/n
 ipset destroy owp_pxy_skip 2>/dev/null
 iptables -w -t mangle -D PREROUTING -j owp_pxyt 2>/dev/null; iptables -w -t mangle -F owp_pxyt 2>/dev/null; iptables -w -t mangle -X owp_pxyt 2>/dev/null
 ip rule del fwmark 0x1000000/0x1000000 lookup 207 2>/dev/null; ip route flush table 207 2>/dev/null
+command -v nft >/dev/null && nft delete table ip wharf_pxy 2>/dev/null
 for r in $(uci -q show firewall | sed -n "s/^firewall\.\(owpx_[a-z0-9_]*\)=redirect$/\1/p"); do
 	uci delete firewall.$r && changed=1
 done
