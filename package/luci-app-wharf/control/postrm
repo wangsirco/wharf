@@ -44,6 +44,8 @@ for s in $(uci -q show dhcp | sed -n "s/^dhcp\.\([^.]*\)\.logfacility='\/var\/lo
 	uci commit dhcp && /etc/init.d/dnsmasq restart >/dev/null 2>&1
 done
 rm -f /var/log/owp-dns.log
+# dnsmasq records for the panel's names (wharf.lan, the public name)
+for s in owpn_local owpn_public; do uci -q delete dhcp.$s && uci commit dhcp && /etc/init.d/dnsmasq reload >/dev/null 2>&1; done
 rm -f /etc/sysctl.d/90-wharf.conf
 # components installed from the panel (and only those): remove them once this opkg run has finished,
 # keeping any that another installed package has come to depend on

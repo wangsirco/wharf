@@ -1,7 +1,10 @@
 # Changelog · 更新日志
 
-## Unreleased · 未发布
+## 0.18.2 — passkeys and device recognition · Passkey 登录与设备识别
 
+- Passkey sign-in (Face ID / fingerprint / security key) next to the password, on the local name wharf.lan or an optional public name with a Let's Encrypt certificate (Cloudflare DNS challenge) · Passkey 登录；本地域名 wharf.lan 与可选公网域名 + Let's Encrypt
+- Device recognition by DHCP fingerprint, mDNS (names, models, services; sleep-proxy answers for sleeping iPhones) and UPnP; private-MAC phones show their system and maker, TVs / printers / consoles their model · 按 DHCP 指纹、mDNS、UPnP 识别设备
+- Alerts state times with the time zone (new setting, the router's by default); device left / came back give leave and return times, model, system, IP and MAC; Telegram titles in bold · 告警写明时间与时区，离开 / 回来消息更完整
 - Fix: adding a Telegram channel always failed with "格式不正确" (the Chat ID never reached the server). The Chat ID can now be left empty and is found from the bot's messages; the token may be pasted with a "bot" prefix or as a whole API address, and is checked with Telegram · 修复 Telegram 渠道总提示格式不正确；Chat ID 可自动获取
 
 ## 0.18.1 — sharper alerts and device status · 告警与设备状态细化

@@ -127,6 +127,7 @@ export default function SettingsPage() {
         <Section title="IP 离线库" desc="DB-IP Lite（City + ASN），每月自动更新，用于访问记录的 ASN / 运营商 / 位置 / 时区判断。">
           <div className="p-4"><Button variant="outline" size="sm" disabled={geoBusy} onClick={updateGeo}><RefreshCw className={geoBusy ? 'animate-spin' : ''} /> 立即更新</Button></div>
         </Section>
+        <PanelNames />
         <NextDNSSettings draft={draft} setDraft={setDraft} saved={s} />
         <PVESettings draft={draft} setDraft={setDraft} saved={s} />
         <UpdateSettings draft={draft} setDraft={setDraft} />
@@ -334,6 +335,54 @@ function UpdateSettings({ draft, setDraft }: { draft: Settings; setDraft: (d: Se
         <p className="text-[11px] text-muted-foreground">只会下载经过发布者签名的更新；IP 库和规则库一直是各自自动更新的。</p>
       </div>
       {dialog}
+    </Section>
+  )
+}
+
+interface Names { local: string; port: string; public: string; token_set: boolean; token_from_ddns: boolean; cert_busy: boolean; cert_error: string; cert_expires?: number }
+
+// PanelNames: the addresses passkeys work on (a domain name with a trusted certificate).
+function PanelNames() {
+  const { data, reload } = useApi<Names>('/panel/names', 8000)
+  const [f, setF] = useState<{ public: string; token: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!data) return null
+  const v = f ?? { public: data.public, token: data.token_set ? '••••••••' : '' }
+  const url = (h: string) => `https://${h}${data.port && data.port !== '443' ? ':' + data.port : ''}`
+  const save = async (clear = false) => {
+    setBusy(true)
+    try { await post('/panel/names', clear ? { public: '', token: '' } : v); setF(null); toast.success(clear ? '已清除公网域名' : '已保存，正在申请证书'); reload() }
+    catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <Section title="面板域名（Passkey）" desc="Passkey 只能在域名上使用，而且浏览器要信任证书。下面两个地址都可以用来打开面板。" className="xl:col-span-2">
+      <div className="grid gap-5 p-4 lg:grid-cols-2">
+        <div className="grid content-start gap-2">
+          <div className="text-sm font-medium">本地域名</div>
+          <a className="font-mono text-sm text-primary underline" href={url(data.local)}>{url(data.local)}</a>
+          <p className="text-xs text-muted-foreground">家里的设备直接可用（路由器自己解析）。证书由面板签发：每台要用 Passkey 的设备先安装一次面板证书（登录页「证书」里有下载和各系统步骤），之后浏览器不再提示不安全。</p>
+        </div>
+        <div className="grid content-start gap-2">
+          <div className="text-sm font-medium">公网域名（可选）</div>
+          <p className="text-xs text-muted-foreground">用你自己的域名，比如 panel.example.com：家里由路由器直接解析到面板，证书通过 Cloudflare 的 DNS 验证自动向 Let's Encrypt 申请（不用开放端口），所有设备都不用装证书。</p>
+          <Field label="域名"><Input value={v.public} placeholder="panel.example.com" onChange={(e) => setF({ ...v, public: e.target.value.trim().toLowerCase() })} /></Field>
+          <Field label="Cloudflare API 令牌" hint={data.token_from_ddns ? '留空：会使用 DDNS 里这个域名的 Cloudflare 令牌' : '需要「区域 → DNS → 编辑」权限；如果 DDNS 里已有这个域名的 Cloudflare 记录，可以留空'}>
+            <Input type="password" autoComplete="off" value={v.token} onChange={(e) => setF({ ...v, token: e.target.value })} />
+          </Field>
+          {data.public && (
+            <div className="text-xs">
+              {data.cert_busy ? <span className="text-muted-foreground">正在申请证书（通常 1–2 分钟）…</span>
+                : data.cert_expires ? <span className="text-success">证书有效期至 {datetime(data.cert_expires).slice(0, 10)}，可以打开 <a className="underline" href={url(data.public)}>{url(data.public)}</a></span>
+                : data.cert_error ? <span className="text-destructive">证书申请失败：{data.cert_error}</span>
+                : <span className="text-muted-foreground">还没有证书</span>}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy || !v.public} onClick={() => save()}>保存并申请证书</Button>
+            {data.public && <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(true)}>清除</Button>}
+          </div>
+        </div>
+      </div>
     </Section>
   )
 }

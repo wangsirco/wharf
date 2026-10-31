@@ -76,10 +76,11 @@ type LocalCA struct {
 	caDER []byte
 	key   crypto.Signer
 
-	mu   sync.RWMutex
-	leaf *tls.Certificate
-	ips  []string
-	exp  time.Time
+	mu    sync.RWMutex
+	leaf  *tls.Certificate
+	ips   []string
+	names []string // DNS names the leaf covers (besides localhost)
+	exp   time.Time
 }
 
 const leafDays = 397 // under every browser's limit for server certificates
@@ -178,16 +179,23 @@ func LocalAddrs() []string {
 // Refresh (re)issues the server certificate when the addresses changed or it expires within 30 days.
 func (c *LocalCA) Refresh(names []string) error {
 	ips := LocalAddrs()
+	var want []string
+	for _, n := range names {
+		if n = strings.ToLower(strings.TrimSuffix(n, ".")); localName(n) && !slices.Contains(want, n) {
+			want = append(want, n)
+		}
+	}
+	slices.Sort(want)
 	c.mu.RLock()
-	fresh := c.leaf != nil && slices.Equal(ips, c.ips) && time.Until(c.exp) > 30*24*time.Hour
+	fresh := c.leaf != nil && slices.Equal(ips, c.ips) && slices.Equal(want, c.names) && time.Until(c.exp) > 30*24*time.Hour
 	c.mu.RUnlock()
 	if fresh {
 		return nil
 	}
 	certFile, keyFile := filepath.Join(c.dir, "server.crt"), filepath.Join(c.dir, "server.key")
 	if pair, err := tls.LoadX509KeyPair(certFile, keyFile); err == nil {
-		if leaf, err := x509.ParseCertificate(pair.Certificate[0]); err == nil && c.covers(leaf, ips) && time.Until(leaf.NotAfter) > 30*24*time.Hour {
-			c.set(&pair, ips, leaf.NotAfter)
+		if leaf, err := x509.ParseCertificate(pair.Certificate[0]); err == nil && c.covers(leaf, ips, want) && time.Until(leaf.NotAfter) > 30*24*time.Hour {
+			c.set(&pair, ips, want, leaf.NotAfter)
 			return nil
 		}
 	}
@@ -196,12 +204,7 @@ func (c *LocalCA) Refresh(names []string) error {
 		return err
 	}
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
-	dns := []string{"localhost"}
-	for _, n := range names {
-		if n = strings.ToLower(strings.TrimSuffix(n, ".")); localName(n) && !slices.Contains(dns, n) {
-			dns = append(dns, n)
-		}
-	}
+	dns := append([]string{"localhost"}, slices.DeleteFunc(slices.Clone(want), func(n string) bool { return n == "localhost" })...)
 	var ipList []net.IP
 	if !slices.Contains(ips, "127.0.0.1") {
 		ipList = append(ipList, net.IPv4(127, 0, 0, 1))
@@ -227,13 +230,18 @@ func (c *LocalCA) Refresh(names []string) error {
 		return err
 	}
 	pair := tls.Certificate{Certificate: [][]byte{der, c.caDER}, PrivateKey: key}
-	c.set(&pair, ips, tpl.NotAfter)
+	c.set(&pair, ips, want, tpl.NotAfter)
 	return nil
 }
 
-func (c *LocalCA) covers(leaf *x509.Certificate, ips []string) bool {
+func (c *LocalCA) covers(leaf *x509.Certificate, ips, names []string) bool {
 	if leaf.CheckSignatureFrom(c.ca) != nil {
 		return false
+	}
+	for _, n := range names {
+		if !slices.Contains(leaf.DNSNames, n) {
+			return false
+		}
 	}
 	for _, s := range ips {
 		if !slices.ContainsFunc(leaf.IPAddresses, func(ip net.IP) bool { return ip.Equal(net.ParseIP(s)) }) {
@@ -243,12 +251,12 @@ func (c *LocalCA) covers(leaf *x509.Certificate, ips []string) bool {
 	return true
 }
 
-func (c *LocalCA) set(pair *tls.Certificate, ips []string, exp time.Time) {
+func (c *LocalCA) set(pair *tls.Certificate, ips, names []string, exp time.Time) {
 	if len(pair.Certificate) == 1 {
 		pair.Certificate = append(pair.Certificate, c.caDER) // send the chain
 	}
 	c.mu.Lock()
-	c.leaf, c.ips, c.exp = pair, ips, exp
+	c.leaf, c.ips, c.names, c.exp = pair, ips, names, exp
 	c.mu.Unlock()
 }
 

@@ -7,9 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, ErrorBox } from '@/components/common'
 import { CertHelp } from '@/components/cert-help'
+import { browserTZ } from '@/lib/beacon'
+import { passkeyLogin, passkeySupported } from '@/lib/passkey'
+import { KeyRound } from 'lucide-react'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, adopt } = useAuth()
   const brand = useBrand()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -21,6 +24,13 @@ export default function Login() {
     e.preventDefault()
     setBusy(true); setError('')
     try { await login(username, password) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+  }
+
+  const pk = brand.passkey
+  const onName = !!pk?.hosts.includes(location.hostname)
+  const usePasskey = async () => {
+    setBusy(true); setError('')
+    try { await adopt(await passkeyLogin(browserTZ())) } catch (err) { if ((err as Error).message !== '已取消') setError((err as Error).message) } finally { setBusy(false) }
   }
 
   return (
@@ -38,6 +48,16 @@ export default function Login() {
           <Field label="密码"><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
           {error && <ErrorBox>{error}</ErrorBox>}
           <Button type="submit" disabled={busy || !username || !password} className="h-9">{busy ? '登录中…' : '登录'}</Button>
+          {pk && onName && passkeySupported() && (
+            <Button type="button" variant="outline" disabled={busy} className="h-9" onClick={usePasskey}><KeyRound /> 用 Passkey 登录</Button>
+          )}
+          {pk && !onName && (
+            <p className="text-center text-xs text-muted-foreground">
+              想用 Passkey（Face ID / 指纹）登录？请通过 {pk.hosts.map((h, i) => (
+                <span key={h}>{i > 0 && ' 或 '}<a className="text-primary underline" href={`https://${h}${pk.port && pk.port !== '443' ? ':' + pk.port : ''}/login`}>{h}</a></span>
+              ))} 打开面板
+            </p>
+          )}
         </div>
       </form>
       {brand.cert && <CertHelp cert={brand.cert} />}

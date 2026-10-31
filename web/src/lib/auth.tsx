@@ -8,6 +8,7 @@ interface AuthState {
   meta: Meta | null
   loading: boolean
   login: (username: string, password: string) => Promise<void>
+  adopt: (r: { user: unknown; csrf: string }) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
   onboarded: boolean
@@ -50,6 +51,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMeta(await get<Meta>('/meta'))
     setOnboarded((await get<{ onboarded: boolean }>('/me').catch(() => ({ onboarded: true }))).onboarded)
   }
+  // after a passkey sign-in (lib/passkey.ts) the session exists already
+  const adopt = async (r: { user: unknown; csrf: string }) => {
+    setCsrf(r.csrf)
+    setUser(r.user as User)
+    setMeta(await get<Meta>('/meta'))
+    setOnboarded((await get<{ onboarded: boolean }>('/me').catch(() => ({ onboarded: true }))).onboarded)
+  }
   const logout = async () => {
     await post('/logout').catch(() => {})
     setUser(null)
@@ -57,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isSuper = user?.role === 'super'
   const can = (perm: string) => !!user && (isSuper || user.perms.includes(perm))
 
-  return <Ctx.Provider value={{ user, meta, loading, login, logout, refresh, onboarded, setOnboarded, can, isSuper }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ user, meta, loading, login, adopt, logout, refresh, onboarded, setOnboarded, can, isSuper }}>{children}</Ctx.Provider>
 }
 
 export const useAuth = () => useContext(Ctx)

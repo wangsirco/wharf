@@ -113,7 +113,7 @@ function UserMenu() {
         <DropdownMenuItem onClick={() => pick(theme === 'dark' ? 'light' : 'dark')}>
           {theme === 'dark' ? <Sun /> : <Moon />} {theme === 'dark' ? '浅色模式' : '深色模式'}
         </DropdownMenuItem>
-        <DropdownMenuItem render={<NavLink to="/account" />}><KeyRound /> 修改密码</DropdownMenuItem>
+        <DropdownMenuItem render={<NavLink to="/account" />}><KeyRound /> 账号安全（密码 / Passkey）</DropdownMenuItem>
         <DropdownMenuItem onClick={() => window.dispatchEvent(new Event('owp:welcome'))}><Sparkles /> 使用向导</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={logout}><LogOut /> 退出登录</DropdownMenuItem>

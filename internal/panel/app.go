@@ -167,6 +167,8 @@ var settingDefaults = map[string]string{
 	"identity.dhcp_log":         "1",               // dnsmasq logs DHCP option lists (device fingerprints)
 	"identity.probe":            "1",               // ask LAN devices about themselves (mDNS / UPnP) every 10 min
 	"ui.name":                   "Wharf",           // panel name on the login page, sidebar and browser tab
+	"panel.public_name":         "",                // public name with a Let's Encrypt certificate (panelname.go)
+	"panel.cf_token":            "",                // Cloudflare token for its DNS-01 challenge
 	"ui.timezone":               "",                // IANA zone for times in alerts; "" = the router's zone
 	"ui.subtitle":               "OpenWrt 控制面板",    //
 	"update.repo":               "wangsirco/wharf", // GitHub owner/name the online update uses
@@ -255,6 +257,7 @@ func (a *App) Start() {
 	go a.ddnsLoop()
 	go a.onePanelLoop()
 	go a.identityLoop()
+	go a.panelNamesLoop()
 	log.Printf("panel ready")
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 // Panel name and subtitle, editable in 系统设置 and readable before login.
-export interface Brand { name: string; subtitle: string; cert?: { name: string; sha256: string } }
+export interface Brand { name: string; subtitle: string; cert?: { name: string; sha256: string }; passkey?: { hosts: string[]; port: string } }
 
 const DEFAULT: Brand = { name: 'Wharf', subtitle: 'OpenWrt 控制面板' }
 let current: Brand = DEFAULT
@@ -16,7 +16,7 @@ function publish(b: Brand) {
 
 export function refreshBrand() {
   loaded = fetch('/api/public/config').then((r) => r.json())
-    .then((c) => publish({ name: c.name || DEFAULT.name, subtitle: c.subtitle ?? DEFAULT.subtitle, cert: c.cert }))
+    .then((c) => publish({ name: c.name || DEFAULT.name, subtitle: c.subtitle ?? DEFAULT.subtitle, cert: c.cert, passkey: c.passkey }))
     .catch(() => {})
   return loaded
 }

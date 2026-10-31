@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -23,6 +24,12 @@ func (a *App) Routes() http.Handler {
 
 	// public
 	m.HandleFunc("POST /api/login", a.handleLogin)
+	m.HandleFunc("POST /api/login/passkey/begin", a.handlePasskeyLoginBegin)
+	m.HandleFunc("POST /api/login/passkey/finish", a.handlePasskeyLoginFinish)
+	m.HandleFunc("GET /api/me/passkeys", a.auth("", a.handlePasskeys))
+	m.HandleFunc("POST /api/me/passkeys/begin", a.auth("", a.handlePasskeyBegin))
+	m.HandleFunc("POST /api/me/passkeys/finish", a.auth("", a.handlePasskeyFinish))
+	m.HandleFunc("DELETE /api/me/passkeys/{id}", a.auth("", a.handlePasskeyDelete))
 	m.HandleFunc("POST /api/logout", a.handleLogout)
 	m.HandleFunc("GET /api/me", a.handleMe)
 	m.HandleFunc("POST /api/beacon", a.handleBeacon)
@@ -137,6 +144,8 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/alerts/channels/{id}/toggle", a.super(a.handleAlertChannelToggle))
 	m.HandleFunc("POST /api/alerts/test", a.super(a.handleAlertTest))
 	m.HandleFunc("POST /api/alerts/telegram/chats", a.super(a.handleTelegramChats))
+	m.HandleFunc("GET /api/panel/names", a.super(a.handlePanelNames))
+	m.HandleFunc("POST /api/panel/names", a.super(a.handlePanelNamesSave))
 	m.HandleFunc("GET /api/access/me", a.super(a.handleAccessMe))
 	m.HandleFunc("PUT /api/settings", a.super(a.handleSettingsUpdate))
 	m.HandleFunc("GET /api/agent/status", a.super(a.handleAgentStatus))
@@ -519,7 +528,7 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a.publicSettings())
 }
 
-var secretSettings = []string{"nextdns.api_key", "pve.token"}
+var secretSettings = []string{"nextdns.api_key", "pve.token", "panel.cf_token"}
 
 // publicSettings hides secrets and internal cursors.
 func (a *App) publicSettings() map[string]string {
@@ -662,6 +671,8 @@ func (a *App) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 	if a.CA != nil {
 		out["cert"] = map[string]string{"name": a.CA.CAName(), "sha256": a.CA.CAFingerprint()}
 	}
+	_, port, _ := net.SplitHostPort(a.cfg.Listen)
+	out["passkey"] = map[string]any{"hosts": a.passkeyHosts(), "port": port} // names passkeys work on
 	writeJSON(w, 200, out)
 }
 

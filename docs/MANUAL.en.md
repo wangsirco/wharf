@@ -137,7 +137,18 @@ The panel uses its own **local certificate authority**. It can only sign for LAN
 
 After that, Wharf added to the iPhone home screen opens like an app. Typing an `http://` address redirects to `https://` automatically.
 
-### 4.4 First-login wizard
+### 4.4 Signing in with a passkey
+
+Passkeys let you sign in with Face ID, a fingerprint or a security key instead of the password (the password keeps working). Browsers only allow passkeys on a **domain name** with a **trusted certificate**, so:
+
+1. Open the panel by name: the local name `https://wharf.lan:7080` (answered by the router; `lan` is your dnsmasq domain), or the public name set under *Settings → Panel names*. Opened by IP address, the login page links to the right address.
+2. On the local name, install the panel certificate once per device (see 4.3); on a public name the certificate comes from Let's Encrypt and nothing needs installing.
+3. Signed in, open *账号安全* (account security) in the top-right menu and add a passkey. Add one per device or password manager (iCloud Keychain, Google Password Manager, 1Password …); remove them at any time.
+4. Next time choose *用 Passkey 登录* on the login page; no username needed.
+
+A passkey belongs to the name it was added on. Passkey sign-ins go through the same rate limit and access control as passwords and are audited (*登录（Passkey）*).
+
+### 4.5 First-login wizard
 
 Every user sees a 5–6 step wizard on first login. Any step can be skipped:
 
@@ -220,7 +231,13 @@ Switch at the top right; the browser remembers your choice.
 
 ### 6.4 Devices
 
-- **Automatic recognition:** brand, type (phone, computer, TV, camera, NAS, VM …) and OS, based on the MAC vendor (offline OUI database), DHCP hostname and mDNS / web probing. Randomised MACs are marked.
+- **Automatic recognition:** brand, type (phone, computer, TV, camera, NAS, printer, console, VM …), system and model. Signals, strongest first:
+  - the type you set; the DHCP hostname;
+  - **what the device says about itself:** every 10 minutes the panel asks online devices over Bonjour (mDNS) and UPnP; Apple devices give their name and model (`MacBookAir10,1`, `AppleTV14,1`), TVs, printers and consoles their model and name; an Apple TV or HomePod answers for sleeping iPhones;
+  - **DHCP fingerprint:** the parameters a device asks for when it gets an address, and its vendor class (iPhone, Android, Windows and Mac differ; Android also gives its version);
+  - the MAC vendor (offline OUI database) and the platforms it talks to (Apple, Google, Microsoft, Huawei, Samsung, Xiaomi, OPPO, vivo).
+
+  Private (randomised) MACs have no vendor and rely on the last three, so they show as *iPhone / iPad（隐私 MAC）*, *三星 手机（隐私 MAC）* and so on; a newly joined device has a DHCP fingerprint after its next renewal or Wi-Fi reconnect. The device page says which signal was used. Both active collectors can be switched off under *Settings → Device recognition*.
 - **Proxmox VMs:** with a read-only Proxmox API token, VMs show their name from Proxmox and a *PVE 虚拟机 #id* tag.
 - **Aliases and notes:** the alias you set is used everywhere in the panel (forwards, controls, search). Any characters are allowed, including apostrophes and mixed case.
 - **Presence:**
@@ -376,7 +393,7 @@ All active controls are listed together on the *设备管控* page.
 
 ### 6.12 Alerts
 
-- **Channels:** ServerChan and Telegram bots. You can add several; their addresses are masked in the UI and the audit log.
+- **Channels:** ServerChan and Telegram bots. You can add several; their addresses are masked in the UI and the audit log. For Telegram only the bot token is needed (with or without the `bot` prefix, or as a whole getUpdates address): leave the Chat ID empty and the panel finds it from the bot's recent messages; with several chats, *自动获取* lets you pick one.
 - **Rules:**
   - new device joined
   - internet down / back: the whole home's internet unreachable for N minutes, and again when it recovers
@@ -390,11 +407,14 @@ All active controls are listed together on the *设备管控* page.
   - every rule has its own switch
 - **Quiet hours:** urgent alerts such as WAN down are still sent.
 - **Log:** where every alert went and whether it succeeded.
-- Alert titles start with your panel name, for example "[Home] Monitor down: …".
+- Alert titles start with your panel name, for example "[Home] Monitor down: …"; Telegram shows them in bold.
+- **Times and time zone:** every message ends with its time and zone, for example "🕒 2026-11-01 08:42 NZDT（新西兰 · UTC+13）". A departure gives when the device left and how long it had been home; a return gives the return and leave times and how long it was away, with the device's model, system, IP and MAC. The zone is set under *Settings → Panel name* and follows the router by default.
 
 ### 6.13 Settings
 
-- **Panel name and subtitle.**
+- **Panel name, subtitle and time zone** (the zone is used in alerts; empty follows the router).
+- **Device recognition:** DHCP fingerprints (dnsmasq logs the parameters devices ask for) and asking devices for their name and model (mDNS / UPnP, every 10 minutes); see 6.4.
+- **Panel names (passkeys):** the local name `wharf.<your LAN domain>`, and optionally a public name: the router answers it at home with the panel's address, and the certificate comes from Let's Encrypt through a Cloudflare DNS challenge (a token with *Zone → DNS → Edit*; it can be left empty when DDNS already has a Cloudflare record for that domain). It renews itself, and no port needs to be open.
 - **Approval for sensitive actions:** choose which actions by scoped admins need super-admin approval (plugin switches, reboot, port forwards, device controls …).
 - **Retention and thresholds:**
   - Audit 365 days, visitor log 90 days.
@@ -581,6 +601,8 @@ Wharf only changes things when you use the matching feature, and uses standard c
 | Device controls | `/etc/config/owpdev`; iptables chains `owp_pol` / `owp_polin` / `owp_dns`; ipsets `owp_p[bw]_*` | setting a control | chains and ipsets removed |
 | Traffic counters | iptables chain `owp_acct`; ipsets `owp_up` / `owp_dn` | agent start | removed |
 | DNS query log | dnsmasq `logqueries` + `logfacility=/var/log/owp-dns.log` | first agent start | restored |
+| DHCP fingerprints | dnsmasq `logdhcp` (same log file); results in `fingerprints.json` in the data directory | while device recognition is on (default) | restored |
+| Panel names | `/etc/config/dhcp` domain sections `owpn_local` (wharf.lan) / `owpn_public` | panel start / setting a public name | removed |
 | WAN access to panel / agent | firewall rules `owp_panel` / `owp_agent` | only if you tick *allow from WAN* in LuCI | removed |
 | Static leases, local DNS | `/etc/config/dhcp` (host / domain sections) | when used | kept |
 | Scheduled reboot | root crontab (tagged `# owp-reboot`) | when set | kept (turn it off in the panel) |

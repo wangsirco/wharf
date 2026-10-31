@@ -187,6 +187,10 @@ var migrations = []string{
 	`CREATE TABLE net_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
 		detail TEXT NOT NULL DEFAULT '');
 	 CREATE INDEX net_events_ts ON net_events(ts)`,
+	// v18: passkeys (WebAuthn credentials, per user and name)
+	`CREATE TABLE passkeys (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		rp_id TEXT NOT NULL, cred_id TEXT NOT NULL UNIQUE, cred TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER NOT NULL DEFAULT 0);
+	 CREATE INDEX passkeys_user ON passkeys(user_id)`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

@@ -132,7 +132,12 @@ func main() {
 		}
 		go ca.Watch(certNames, log.Printf)
 		app.CA = ca
-		srv.TLSConfig = &tls.Config{GetCertificate: ca.GetCertificate, MinVersion: tls.VersionTLS12}
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			if c := app.PublicCertificate(h); c != nil { // the public name's Let's Encrypt certificate
+				return c, nil
+			}
+			return ca.GetCertificate(h)
+		}}
 		ln, err := net.Listen("tcp", cfg.Listen)
 		if err != nil {
 			log.Fatal(err)
@@ -161,7 +166,7 @@ func certNames() []string {
 	if out, err := exec.Command("uci", "-q", "get", "dhcp.@dnsmasq[0].domain").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
 		domain = strings.TrimSpace(string(out))
 	}
-	names := []string{domain}
+	names := []string{domain, panel.LocalPanelName(domain)} // wharf.lan: the name passkeys work on
 	if h, err := os.Hostname(); err == nil && h != "" && !strings.ContainsAny(h, "_ ") {
 		names = append(names, h+"."+domain)
 	}

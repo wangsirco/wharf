@@ -737,16 +737,18 @@ func rrOf(domain, zone string) string {
 	return strings.TrimSuffix(domain, "."+zone)
 }
 
-func cfUpdate(d *DDNS, ip string) (string, error) {
-	api := "https://api.cloudflare.com/client/v4"
-	call := func(method, path string, body any, out any) error {
+// cfCall returns a Cloudflare API caller for one token (also used for the panel's own
+// certificate, panelcert.go).
+func cfCall(token string) func(method, path string, body any, out any) error {
+	api := cfAPI
+	return func(method, path string, body any, out any) error {
 		var rd io.Reader
 		if body != nil {
 			b, _ := json.Marshal(body)
 			rd = bytes.NewReader(b)
 		}
 		req, _ := http.NewRequest(method, api+path, rd)
-		req.Header.Set("Authorization", "Bearer "+d.Creds["token"])
+		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		var env struct {
 			Success bool `json:"success"`
@@ -770,8 +772,13 @@ func cfUpdate(d *DDNS, ip string) (string, error) {
 		}
 		return nil
 	}
-	var zoneID string
-	for _, z := range zoneCandidates(d.Domain) {
+}
+
+var cfAPI = "https://api.cloudflare.com/client/v4" // replaced in tests
+
+// cfZone finds the zone a name belongs to.
+func cfZone(call func(string, string, any, any) error, domain string) (string, error) {
+	for _, z := range zoneCandidates(domain) {
 		var zones []struct {
 			ID string `json:"id"`
 		}
@@ -779,12 +786,17 @@ func cfUpdate(d *DDNS, ip string) (string, error) {
 			return "", err
 		}
 		if len(zones) > 0 {
-			zoneID = zones[0].ID
-			break
+			return zones[0].ID, nil
 		}
 	}
-	if zoneID == "" {
-		return "", errors.New("这个令牌下找不到该域名的区域（Zone）")
+	return "", errors.New("这个令牌下找不到该域名的区域（Zone）")
+}
+
+func cfUpdate(d *DDNS, ip string) (string, error) {
+	call := cfCall(d.Creds["token"])
+	zoneID, err := cfZone(call, d.Domain)
+	if err != nil {
+		return "", err
 	}
 	var recs []struct {
 		ID      string `json:"id"`
