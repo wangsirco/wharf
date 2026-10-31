@@ -71,7 +71,7 @@ Wharf turns this into a panel that family members can read, that admins can safe
 | **System** | CPU / memory / disk / temperature, plugin services, system log, reboot and scheduled reboot, backup and restore, **dependency manager** |
 | **Multiple admins** | Users and permissions (12 fine-grained permissions), quotas, port-range grants, approvals, my requests, audit log with one-click restore |
 | **Security** | Panel access control (LAN by device, internet by country, IP allow / deny, browser time-zone check), visitor log (ASN, ISP, proxy hints), local CA certificate, login rate limiting |
-| **Alerts** | ServerChan and Telegram: new device, WAN down, watched device offline, traffic spike, denied access, pending approval, monitor down / recovered; quiet hours |
+| **Alerts** | ServerChan and Telegram: new device, internet down / back, device left / came back, traffic spike, denied access, pending approval, monitor down / recovered; quiet hours |
 | **Other** | First-login wizard, custom panel name, installable PWA, phone layout, dark mode, ⌘K search, online updates |
 
 ---
@@ -377,8 +377,8 @@ All active controls are listed together on the *设备管控* page.
 - **Channels:** ServerChan and Telegram bots. You can add several; their addresses are masked in the UI and the audit log.
 - **Rules:**
   - new device joined
-  - WAN down for more than N minutes
-  - watched device offline for more than N minutes (for example a NAS or camera)
+  - internet down / back: the whole home's internet unreachable for N minutes, and again when it recovers
+  - device left / came back (two separate switches): a device not seen on the network for N minutes (10 by default, the same rule as the dashboard's arrivals and departures) has left; when it shows up again it is back, with how long it was away. Either the selected devices (family phones, a NAS, cameras …) or every device; several devices in the same minute become one message. A watch list saved by 0.18 or earlier carries over
   - a device used more than N MB in an hour
   - panel access denied (someone tried to log in from somewhere not allowed)
   - action waiting for approval

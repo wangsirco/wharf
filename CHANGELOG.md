@@ -1,5 +1,9 @@
 # Changelog · 更新日志
 
+## Unreleased · 未发布
+
+- Alerts: separate "device left" and "device came back" switches for selected or all devices, driven by the same presence tracking as the dashboard and grouped per minute; "WAN down" renamed to make clear it is the whole home's internet · 告警：设备离开 / 回来分开设置，可选设备或全部设备，同一分钟合并；「断网 / 恢复」明确为整个家的外网
+
 ## 0.18.0 — proxy extension and DDNS · 代理扩展与动态域名
 
 - Optional proxy extension: official Xray-core installed online and run as nobody; VLESS / REALITY / Vision / XHTTP / Trojan / VMess / SS2022 / Hysteria 2 · 代理扩展

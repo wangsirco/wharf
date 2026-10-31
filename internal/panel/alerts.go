@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,11 +20,18 @@ import (
 // delivered through Server 酱 or Telegram.
 
 type AlertRules struct {
-	NewDevice       bool     `json:"new_device"`
-	WanDown         bool     `json:"wan_down"`
-	WanDownMinutes  int      `json:"wan_down_minutes"`
-	OfflineWatch    []string `json:"offline_watch"` // MACs to report when offline
-	OfflineMinutes  int      `json:"offline_minutes"`
+	NewDevice      bool `json:"new_device"`
+	WanDown        bool `json:"wan_down"`
+	WanDownMinutes int  `json:"wan_down_minutes"`
+	// device left / came back (from the presence tracker, see presence.go)
+	DeviceLeft    bool     `json:"device_left"`
+	DeviceBack    bool     `json:"device_back"`
+	PresenceAll   bool     `json:"presence_all"`   // every device, not only PresenceWatch
+	PresenceWatch []string `json:"presence_watch"` // MACs
+	AwayMinutes   int      `json:"away_minutes"`   // = setting presence.away_minutes (shown here)
+	// ≤ 0.18: one watch list for "offline" and "back online"; moved to the fields above
+	OfflineWatch    []string `json:"offline_watch,omitempty"`
+	OfflineMinutes  int      `json:"offline_minutes,omitempty"`
 	TrafficSpike    bool     `json:"traffic_spike"`
 	SpikeMBPerHour  int      `json:"spike_mb_per_hour"`
 	PanelDenied     bool     `json:"panel_denied"`
@@ -32,8 +40,8 @@ type AlertRules struct {
 	QuietTo         string   `json:"quiet_to"`
 }
 
-var defaultRules = AlertRules{NewDevice: true, WanDown: true, WanDownMinutes: 2, OfflineMinutes: 5,
-	TrafficSpike: false, SpikeMBPerHour: 2048, PanelDenied: true, ApprovalPending: true, OfflineWatch: []string{}}
+var defaultRules = AlertRules{NewDevice: true, WanDown: true, WanDownMinutes: 2, DeviceLeft: true, DeviceBack: true,
+	TrafficSpike: false, SpikeMBPerHour: 2048, PanelDenied: true, ApprovalPending: true}
 
 type AlertChannel struct {
 	ID      int64  `json:"id"`
@@ -45,10 +53,16 @@ type AlertChannel struct {
 
 func (a *App) alertRules() AlertRules {
 	r := defaultRules
-	_ = json.Unmarshal([]byte(a.setting("alerts.rules")), &r)
-	if r.OfflineWatch == nil {
-		r.OfflineWatch = []string{}
+	raw := a.setting("alerts.rules")
+	_ = json.Unmarshal([]byte(raw), &r)
+	if !strings.Contains(raw, `"presence_watch"`) && len(r.OfflineWatch) > 0 { // saved by ≤ 0.18
+		r.PresenceWatch = r.OfflineWatch
 	}
+	r.OfflineWatch, r.OfflineMinutes = nil, 0
+	if r.PresenceWatch == nil {
+		r.PresenceWatch = []string{}
+	}
+	r.AwayMinutes = a.settingInt("presence.away_minutes")
 	return r
 }
 
@@ -95,6 +109,8 @@ func maskURL(u string) string {
 }
 
 // ---- delivery ----
+
+var sendAlert = sendTo // replaced in tests
 
 // sendTo delivers one message to one channel URL:
 //
@@ -172,7 +188,7 @@ func (a *App) notify(kind, title, body string, urgent bool) {
 			if !c.Enabled {
 				continue
 			}
-			if err := sendTo(c.URL, "【"+a.setting("ui.name")+"】"+title, body); err != nil {
+			if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】"+title, body); err != nil {
 				results = append(results, c.Name+"：失败 "+truncate(err.Error(), 120))
 			} else {
 				results = append(results, c.Name+"：已发送")
@@ -188,16 +204,14 @@ func (a *App) notify(kind, title, body string, urgent bool) {
 // ---- engine ----
 
 type alertState struct {
-	mu          sync.Mutex
-	lastCheck   int64
-	wanDown     bool
-	offlineAt   map[string]int64 // mac -> first seen offline
-	offlineSent map[string]bool
-	spikeSent   map[string]int64 // mac -> hour alerted
+	mu        sync.Mutex
+	lastCheck int64
+	wanDown   bool
+	spikeSent map[string]int64 // mac -> hour alerted
 }
 
 func (a *App) alertEngine() {
-	st := &alertState{lastCheck: time.Now().Unix(), offlineAt: map[string]int64{}, offlineSent: map[string]bool{}, spikeSent: map[string]int64{}}
+	st := &alertState{lastCheck: time.Now().Unix(), spikeSent: map[string]int64{}}
 	time.Sleep(90 * time.Second)
 	for {
 		func() {
@@ -212,6 +226,55 @@ func (a *App) alertEngine() {
 		}()
 		time.Sleep(time.Minute)
 	}
+}
+
+// presenceAlerts reports devices that left or came back in one presence round (the
+// tracker's own events, so alerts and the dashboard always agree). Several devices at
+// once become one message per direction.
+func (a *App) presenceAlerts(evs []presenceEv) {
+	if len(a.alertChannels(false)) == 0 {
+		return
+	}
+	r := a.alertRules()
+	type item struct{ name, detail string }
+	var left, back []item
+	for _, e := range evs {
+		if !r.PresenceAll && !slices.Contains(r.PresenceWatch, e.mac) {
+			continue
+		}
+		name := a.deviceLabel(e.mac)
+		if e.ip != "" && !strings.Contains(name, e.ip) {
+			name += " " + e.ip
+		}
+		switch {
+		case e.kind == "left" && r.DeviceLeft:
+			left = append(left, item{name, "最后在线 " + time.Unix(e.ts, 0).Format("15:04")})
+		case e.kind == "back" && r.DeviceBack:
+			it := item{name, ""}
+			if e.away > 0 {
+				it.detail = "离开了 " + awayText(e.away)
+			}
+			back = append(back, it)
+		}
+	}
+	send := func(kind, verb string, list []item, note string) {
+		switch len(list) {
+		case 0:
+		case 1:
+			a.notify(kind, "设备"+verb+"："+list[0].name, strings.TrimPrefix(list[0].detail+note, "\n"), false)
+		default:
+			lines := make([]string, len(list))
+			for i, it := range list {
+				lines[i] = it.name
+				if it.detail != "" {
+					lines[i] += "（" + it.detail + "）"
+				}
+			}
+			a.notify(kind, fmt.Sprintf("%d 台设备%s", len(list), verb), strings.Join(lines, "\n")+note, false)
+		}
+	}
+	send("device_left", "离开", left, fmt.Sprintf("\n超过 %d 分钟没有在网络里出现", max(r.AwayMinutes, 3)))
+	send("device_back", "回来", back, "")
 }
 
 func (a *App) deviceLabel(mac string) string {
@@ -267,37 +330,6 @@ func (a *App) alertTick(st *alertState) {
 			a.notify("wan_up", "网络已恢复", "公网连接恢复正常（"+time.Now().Format("15:04")+"）", true)
 		}
 		st.wanDown = isDown
-	}
-
-	if len(r.OfflineWatch) > 0 {
-		var devs []Device
-		if a.agent.Do("GET", "/v1/devices", nil, &devs) == nil {
-			online := map[string]bool{}
-			for _, d := range devs {
-				online[d.MAC] = d.Online
-			}
-			mins := int64(r.OfflineMinutes)
-			if mins < 1 {
-				mins = 5
-			}
-			for _, mac := range r.OfflineWatch {
-				if online[mac] {
-					if st.offlineSent[mac] {
-						a.notify("device_online", "设备恢复在线："+a.deviceLabel(mac), "", false)
-					}
-					delete(st.offlineAt, mac)
-					delete(st.offlineSent, mac)
-					continue
-				}
-				if st.offlineAt[mac] == 0 {
-					st.offlineAt[mac] = now
-				}
-				if !st.offlineSent[mac] && now-st.offlineAt[mac] >= mins*60 {
-					st.offlineSent[mac] = true
-					a.notify("device_offline", "设备离线："+a.deviceLabel(mac), fmt.Sprintf("已离线超过 %d 分钟", mins), true)
-				}
-			}
-		}
 	}
 
 	if r.TrafficSpike && r.SpikeMBPerHour > 0 {
@@ -393,9 +425,19 @@ func (a *App) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if req.OfflineWatch == nil {
-		req.OfflineWatch = []string{}
+	if req.PresenceWatch == nil {
+		req.PresenceWatch = []string{}
 	}
+	req.OfflineWatch, req.OfflineMinutes = nil, 0
+	if req.AwayMinutes != 0 && req.AwayMinutes != a.settingInt("presence.away_minutes") {
+		v := strconv.Itoa(req.AwayMinutes)
+		if err := validSetting("presence.away_minutes", v); err != nil {
+			jsonErr(w, 400, err.Error())
+			return
+		}
+		_ = a.setSetting("presence.away_minutes", v)
+	}
+	req.AwayMinutes = 0 // lives in its own setting
 	old := a.setting("alerts.rules")
 	b, _ := json.Marshal(req)
 	if err := a.setSetting("alerts.rules", string(b)); err != nil {
@@ -403,7 +445,7 @@ func (a *App) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "setting.update", "setting", "alerts.rules", "修改告警规则", old, string(b), true)
-	writeJSON(w, 200, req)
+	writeJSON(w, 200, a.alertRules())
 }
 
 // POST /api/alerts/channels {type: serverchan|telegram, name, key | token+chat_id}

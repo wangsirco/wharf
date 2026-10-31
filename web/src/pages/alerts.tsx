@@ -14,7 +14,8 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface Rules {
-  new_device: boolean; wan_down: boolean; wan_down_minutes: number; offline_watch: string[]; offline_minutes: number
+  new_device: boolean; wan_down: boolean; wan_down_minutes: number
+  device_left: boolean; device_back: boolean; presence_all: boolean; presence_watch: string[]; away_minutes: number
   traffic_spike: boolean; spike_mb_per_hour: number; panel_denied: boolean; approval_pending: boolean; quiet_from: string; quiet_to: string
 }
 interface Channel { id: number; name: string; masked: string; enabled: boolean }
@@ -89,23 +90,47 @@ export default function Alerts() {
           {rules && (
             <div className="grid gap-1 p-4">
               {sw('new_device', '新设备接入', '有没见过的设备连上家里网络时')}
-              {sw('wan_down', '断网 / 恢复', `所有检测目标连续 ${rules.wan_down_minutes} 分钟不可达时（不受免打扰限制）`)}
+              {sw('wan_down', '家里断网 / 网络恢复', `整个家的外网：所有检测目标连续 ${rules.wan_down_minutes} 分钟连不上时提醒，恢复后再告诉你（不受免打扰限制）。单台设备的进出见下方`)}
               {sw('traffic_spike', '流量异常', `某台设备 1 小时内用量超过 ${rules.spike_mb_per_hour} MB`)}
               {sw('panel_denied', '面板访问被拒', '有人尝试从不允许的地区 / 设备打开面板')}
               {sw('approval_pending', '待审批', '普通管理员提交了需要你确认的操作')}
-              <div className="grid gap-3 pt-3 sm:grid-cols-3">
+              <div className="grid gap-3 pt-3 sm:grid-cols-2">
                 <Field label="断网判定（分钟）"><Input type="number" min={1} value={rules.wan_down_minutes} onChange={(e) => setRules({ ...rules, wan_down_minutes: Number(e.target.value) })} /></Field>
                 <Field label="流量阈值（MB / 小时）"><Input type="number" min={100} value={rules.spike_mb_per_hour} onChange={(e) => setRules({ ...rules, spike_mb_per_hour: Number(e.target.value) })} /></Field>
-                <Field label="离线判定（分钟）"><Input type="number" min={1} value={rules.offline_minutes} onChange={(e) => setRules({ ...rules, offline_minutes: Number(e.target.value) })} /></Field>
               </div>
               <div className="grid gap-3 pt-3 sm:grid-cols-2">
                 <Field label="免打扰开始" hint="留空则不启用"><Input type="time" value={rules.quiet_from} onChange={(e) => setRules({ ...rules, quiet_from: e.target.value })} /></Field>
                 <Field label="免打扰结束"><Input type="time" value={rules.quiet_to} onChange={(e) => setRules({ ...rules, quiet_to: e.target.value })} /></Field>
               </div>
-              <Field label="离线提醒的设备" hint="例如摄像头、NAS：离线超过设定时间就提醒，恢复后再告诉你" className="pt-3">
-                <DevicePicker devices={(devices ?? []).filter((d) => d.ip).map((d) => ({ ip: d.ip, mac: d.mac, name: d.name, online: d.online }))}
-                  value={rules.offline_watch} onChange={(v) => setRules({ ...rules, offline_watch: v })} />
-              </Field>
+              <div className="mt-3 grid gap-1 rounded-xl border p-3">
+                <div className="text-sm font-medium">设备离开 / 回来</div>
+                <p className="text-xs text-muted-foreground">
+                  某台设备超过 {rules.away_minutes || 10} 分钟没在家里网络出现，算作离开（手机息屏短暂掉线不会误报）；再出现时算作回来，并告诉你离开了多久。和「概览」里的进出记录是同一套判断。同一分钟里有多台设备，会合并成一条消息。
+                </p>
+                {sw('device_left', '设备离开', '例如：孩子的手机离开了家、摄像头 / NAS 掉线')}
+                {sw('device_back', '设备回来', '例如：家人回到家、掉线的设备恢复')}
+                <div className="grid gap-3 pt-2 sm:grid-cols-2">
+                  <Field label="提醒哪些设备">
+                    <div className="flex flex-wrap gap-1.5">
+                      {([[false, '只提醒选中的设备'], [true, '所有设备']] as const).map(([v, l]) => (
+                        <button key={l} type="button" onClick={() => setRules({ ...rules, presence_all: v })}
+                          className={`rounded-md border px-2.5 py-1 text-xs ${rules.presence_all === v ? 'border-primary bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{l}</button>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="离开判定（分钟）" hint="3–240，同时用于概览的进出记录">
+                    <Input type="number" min={3} max={240} value={rules.away_minutes || 10} onChange={(e) => setRules({ ...rules, away_minutes: Number(e.target.value) })} />
+                  </Field>
+                </div>
+                {rules.presence_all
+                  ? <p className="pt-1 text-xs text-muted-foreground">设备多时消息会比较多，可以开启上方的免打扰时段。</p>
+                  : (
+                    <Field label="选中的设备" className="pt-2">
+                      <DevicePicker devices={(devices ?? []).filter((d) => d.ip).map((d) => ({ ip: d.ip, mac: d.mac, name: d.name, online: d.online }))}
+                        value={rules.presence_watch} onChange={(v) => setRules({ ...rules, presence_watch: v })} />
+                    </Field>
+                  )}
+              </div>
             </div>
           )}
         </Section>

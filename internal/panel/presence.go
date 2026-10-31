@@ -62,6 +62,16 @@ func (a *App) presenceTick(now int64) {
 	if !tracking {
 		return
 	}
+	var evs []presenceEv
+	record := func(ts int64, mac, ip, kind string, away int64) {
+		a.presenceEvent(ts, mac, ip, kind, away)
+		evs = append(evs, presenceEv{ts: ts, away: away, mac: mac, ip: ip, kind: kind})
+	}
+	defer func() {
+		if len(evs) > 0 {
+			go a.presenceAlerts(evs)
+		}
+	}()
 	listed := map[string]bool{}
 	for _, d := range devs {
 		listed[d.MAC] = true
@@ -79,13 +89,13 @@ func (a *App) presenceTick(now int64) {
 			// first sighting: baseline only, no event
 		case prev.state == "home" && state == "away":
 			// the agent forgets last-seen times when it restarts; fall back to ours
-			a.presenceEvent(max(d.LastSeen, prev.lastSeen), d.MAC, d.IP, "left", 0)
+			record(max(d.LastSeen, prev.lastSeen), d.MAC, d.IP, "left", 0)
 		case prev.state == "away" && state == "home":
 			away := int64(0) // unknown when it left
 			if prev.lastSeen > 0 {
 				away = d.LastSeen - prev.lastSeen
 			}
-			a.presenceEvent(now, d.MAC, d.IP, "back", away)
+			record(now, d.MAC, d.IP, "back", away)
 		}
 		if !seenBefore || prev.state != state || prev.lastSeen != d.LastSeen {
 			_, _ = a.db.Exec(`INSERT INTO device_presence(mac, state, last_seen, changed_at) VALUES(?,?,?,?)
@@ -97,7 +107,7 @@ func (a *App) presenceTick(now int64) {
 	// a device whose lease and neighbour entry are both gone is no longer listed at all
 	for mac, prev := range known {
 		if !listed[mac] && prev.state == "home" && now-prev.lastSeen >= awayAfter {
-			a.presenceEvent(prev.lastSeen, mac, "", "left", 0)
+			record(prev.lastSeen, mac, "", "left", 0)
 			_, _ = a.db.Exec(`UPDATE device_presence SET state='away', changed_at=? WHERE mac=?`, now, mac)
 		}
 	}
@@ -105,6 +115,11 @@ func (a *App) presenceTick(now int64) {
 
 func (a *App) presenceEvent(ts int64, mac, ip, kind string, away int64) {
 	_, _ = a.db.Exec(`INSERT INTO device_events(ts, mac, ip, kind, away_secs) VALUES(?,?,?,?,?)`, ts, mac, ip, kind, away)
+}
+
+type presenceEv struct {
+	ts, away      int64
+	mac, ip, kind string
 }
 
 // presenceEvents feeds the dashboard event list.
