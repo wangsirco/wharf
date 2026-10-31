@@ -2,7 +2,7 @@
 // update check. scripts/build-ipk.sh reads Version to name the package.
 package version
 
-const Version = "0.18.0"
+const Version = "0.18.1"
 
 // CoreHash fingerprints the agent / panel / package sources this binary was built from
 // (set by scripts/build-ipk.sh with -ldflags); the online update compares it with the

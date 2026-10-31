@@ -1,6 +1,6 @@
 # Changelog · 更新日志
 
-## Unreleased · 未发布
+## 0.18.1 — sharper alerts and device status · 告警与设备状态细化
 
 - Every alert has its own switch (DDNS, monitors, proxy users, proxy certificates were always on) · 每类告警都能单独开关
 - Traffic-spike alerts per hour or per day, per-device thresholds and exclusions · 流量异常：按小时 / 天、单设备阈值、排除设备
