@@ -26,6 +26,7 @@ import (
 //		option captive '1'            # keep OS connectivity checks working while blocked
 //		option force_dns '1'          # redirect the device's DNS to the router, block DoT
 //		list router_port '22'         # deny access to these router ports
+//		option block_router '1'       # while blocked, the router too (DHCP and DNS stay open)
 //
 // They are compiled into dedicated iptables chains (owp_pol in FORWARD, owp_polin
 // in INPUT, owp_dns in nat PREROUTING) and per-device ipsets. Domain rules are
@@ -116,6 +117,8 @@ type DevicePolicy struct {
 	Captive    bool
 	ForceDNS   bool
 	RouterPort []string
+	// BlockRouter: while blocked, no access to the router either (except DHCP / DNS)
+	BlockRouter bool
 }
 
 type PolicyStatus struct {
@@ -165,7 +168,8 @@ func (p *Policy) load() []DevicePolicy {
 		}
 		d := DevicePolicy{Section: id, MAC: mac, Block: secStr(s, "block") == "1", Mode: secStr(s, "mode"),
 			Domains: secList(s, "domain"), CIDRs: secList(s, "cidr"), Captive: secStr(s, "captive") != "0",
-			ForceDNS: secStr(s, "force_dns") != "0", RouterPort: secList(s, "router_port")}
+			ForceDNS: secStr(s, "force_dns") != "0", RouterPort: secList(s, "router_port"),
+			BlockRouter: secStr(s, "block_router") == "1"}
 		for _, sc := range secList(s, "schedule") {
 			if v, err := ParseSchedule(sc); err == nil {
 				d.Schedules = append(d.Schedules, v)
@@ -363,6 +367,11 @@ func (p *Policy) apply(now time.Time) {
 				nat = append(nat, m+" -p "+proto+" --dport 53 -j DNAT --to-destination "+router+":53")
 				fwd = append(fwd, m+" -p "+proto+" --dport 853 -j REJECT") // DNS over TLS / QUIC
 			}
+		}
+		if st.Blocked && d.BlockRouter {
+			// keep the address and name lookups (captive checks need DNS), refuse the rest
+			in = append(in, m+" -p udp -m multiport --dports 53,67 -j RETURN", m+" -p tcp --dport 53 -j RETURN",
+				m+" -p tcp -j REJECT --reject-with tcp-reset", m+" -j REJECT")
 		}
 		if len(d.RouterPort) > 0 {
 			in = append(in, m+" -p tcp -m multiport --dports "+strings.Join(d.RouterPort, ",")+" -j REJECT --reject-with tcp-reset")

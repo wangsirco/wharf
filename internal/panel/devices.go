@@ -37,6 +37,10 @@ type Device struct {
 	Controlled bool   `json:"controlled"`
 	Blocked    bool   `json:"blocked"`
 	BlockedBy  string `json:"blocked_by"` // manual | schedule
+	// Presence (presence.go): "home" or "away" (gone longer than presence.away_minutes);
+	// Online is the instant view, so a dozing phone is offline yet still home.
+	Presence  string `json:"presence,omitempty"`
+	AwaySince int64  `json:"away_since,omitempty"`
 }
 
 // owner returns the panel user that created a router section, 0 if none.
@@ -82,6 +86,21 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
+	type pres struct {
+		state string
+		since int64
+	}
+	presence := map[string]pres{}
+	if rows, err := a.db.Query(`SELECT mac, state, last_seen FROM device_presence`); err == nil {
+		for rows.Next() {
+			var m string
+			var p pres
+			if rows.Scan(&m, &p.state, &p.since) == nil {
+				presence[m] = p
+			}
+		}
+		rows.Close()
+	}
 	var pst agentPolicyStatus
 	_ = a.agent.Do("GET", "/v1/policy/status", nil, &pst)
 	newSince := a.newSince()
@@ -93,6 +112,12 @@ func (a *App) handleDevices(w http.ResponseWriter, r *http.Request) {
 		d.Name = displayName(d.Alias, d.StaticName, d.Hostname, d.devIdent)
 		d.FirstSeen = first[d.MAC]
 		d.IsNew = d.FirstSeen > newSince
+		if p, ok := presence[d.MAC]; ok {
+			d.Presence = p.state
+			if p.state == "away" {
+				d.AwaySince = p.since
+			}
+		}
 		if st, ok := pst[d.MAC]; ok {
 			d.Controlled, d.Blocked, d.BlockedBy = true, st.Blocked, st.Reason
 		}

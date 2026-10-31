@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { Plus, Send, Trash2 } from 'lucide-react'
 import { api, post, put } from '@/lib/api'
@@ -16,7 +16,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 interface Rules {
   new_device: boolean; wan_down: boolean; wan_down_minutes: number
   device_left: boolean; device_back: boolean; presence_all: boolean; presence_watch: string[]; away_minutes: number
-  traffic_spike: boolean; spike_mb_per_hour: number; panel_denied: boolean; approval_pending: boolean; quiet_from: string; quiet_to: string
+  traffic_spike: boolean; spike_mb_per_hour: number; spike_window: 'hour' | 'day'; spike_exclude: string[]; spike_custom: Record<string, number>
+  new_device_skip_random: boolean; wan_line: boolean; ddns_fail: boolean; monitor: boolean; proxy_users: boolean; proxy_cert: boolean
+  panel_denied: boolean; approval_pending: boolean; quiet_from: string; quiet_to: string
 }
 interface Channel { id: number; name: string; masked: string; enabled: boolean }
 interface Resp { rules: Rules; channels: Channel[] | null; log: { ts: number; kind: string; title: string; body: string; result: string }[] | null }
@@ -49,6 +51,7 @@ export default function Alerts() {
     </label>
   )
 
+  const pickable = (devices ?? []).filter((d) => d.ip).map((d) => ({ ip: d.ip, mac: d.mac, name: d.name, online: d.online }))
   return (
     <>
       <PageHeader title="告警推送" desc="发生重要事件时推送到手机。支持 Server 酱和 Telegram。">
@@ -89,21 +92,16 @@ export default function Alerts() {
         <Section title="告警规则" action={<Button size="sm" onClick={saveRules} disabled={!rules}>保存规则</Button>}>
           {rules && (
             <div className="grid gap-1 p-4">
-              {sw('new_device', '新设备接入', '有没见过的设备连上家里网络时')}
-              {sw('wan_down', '家里断网 / 网络恢复', `整个家的外网：所有检测目标连续 ${rules.wan_down_minutes} 分钟连不上时提醒，恢复后再告诉你（不受免打扰限制）。单台设备的进出见下方`)}
-              {sw('traffic_spike', '流量异常', `某台设备 1 小时内用量超过 ${rules.spike_mb_per_hour} MB`)}
-              {sw('panel_denied', '面板访问被拒', '有人尝试从不允许的地区 / 设备打开面板')}
-              {sw('approval_pending', '待审批', '普通管理员提交了需要你确认的操作')}
-              <div className="grid gap-3 pt-3 sm:grid-cols-2">
-                <Field label="断网判定（分钟）"><Input type="number" min={1} value={rules.wan_down_minutes} onChange={(e) => setRules({ ...rules, wan_down_minutes: Number(e.target.value) })} /></Field>
-                <Field label="流量阈值（MB / 小时）"><Input type="number" min={100} value={rules.spike_mb_per_hour} onChange={(e) => setRules({ ...rules, spike_mb_per_hour: Number(e.target.value) })} /></Field>
-              </div>
-              <div className="grid gap-3 pt-3 sm:grid-cols-2">
-                <Field label="免打扰开始" hint="留空则不启用"><Input type="time" value={rules.quiet_from} onChange={(e) => setRules({ ...rules, quiet_from: e.target.value })} /></Field>
-                <Field label="免打扰结束"><Input type="time" value={rules.quiet_to} onChange={(e) => setRules({ ...rules, quiet_to: e.target.value })} /></Field>
-              </div>
-              <div className="mt-3 grid gap-1 rounded-xl border p-3">
-                <div className="text-sm font-medium">设备离开 / 回来</div>
+              <Group title="网络">
+                {sw('wan_down', '家里断网 / 网络恢复', `整个家的外网：所有检测目标连续 ${rules.wan_down_minutes} 分钟连不上时提醒，恢复后再告诉你（不受免打扰限制）`)}
+                {sw('wan_line', '单条线路掉线 / 恢复', `有多条 WAN（多线路 / mwan3）时，其中一条断开 ${rules.wan_down_minutes} 分钟以上就提醒，即使家里还能上网。只有一条线路时不会发`)}
+                <Field label="断网判定（分钟）" className="max-w-48 pt-1"><Input type="number" min={1} value={rules.wan_down_minutes} onChange={(e) => setRules({ ...rules, wan_down_minutes: Number(e.target.value) })} /></Field>
+              </Group>
+              <Group title="新设备">
+                {sw('new_device', '新设备接入', '有没见过的设备连上家里网络时')}
+                {rules.new_device && sw('new_device_skip_random', '忽略随机 MAC 的设备', '手机 / 电脑开启「私有地址」后会定期换 MAC。和已知设备同名的会自动认出、不提醒；打开这项后，其他随机 MAC 设备也不提醒')}
+              </Group>
+              <Group title="设备离开 / 回来">
                 <p className="text-xs text-muted-foreground">
                   某台设备超过 {rules.away_minutes || 10} 分钟没在家里网络出现，算作离开（手机息屏短暂掉线不会误报）；再出现时算作回来，并告诉你离开了多久。和「概览」里的进出记录是同一套判断。同一分钟里有多台设备，会合并成一条消息。
                 </p>
@@ -126,10 +124,28 @@ export default function Alerts() {
                   ? <p className="pt-1 text-xs text-muted-foreground">设备多时消息会比较多，可以开启上方的免打扰时段。</p>
                   : (
                     <Field label="选中的设备" className="pt-2">
-                      <DevicePicker devices={(devices ?? []).filter((d) => d.ip).map((d) => ({ ip: d.ip, mac: d.mac, name: d.name, online: d.online }))}
+                      <DevicePicker devices={pickable}
                         value={rules.presence_watch} onChange={(v) => setRules({ ...rules, presence_watch: v })} />
                     </Field>
                   )}
+              </Group>
+              <Group title="流量">
+                {sw('traffic_spike', '流量异常', `某台设备${rules.spike_window === 'day' ? '今天' : '这个小时'}的用量超过阈值`)}
+                {rules.traffic_spike && <SpikeOptions rules={rules} setRules={setRules} devices={pickable} />}
+              </Group>
+              <Group title="服务">
+                {sw('ddns_fail', 'DDNS 更新失败', '每个域名连续失败时只在第一次提醒')}
+                {sw('monitor', '定时监控异常 / 恢复', '「网络工具 → 定时监控」里的目标连续两次异常或恢复时')}
+                {sw('proxy_users', '代理用户', '流量用到 80% 和用完、3 天内到期和已到期、超出同时在线 IP 限制')}
+                {sw('proxy_cert', '代理证书没有续期', "Let's Encrypt 证书剩不到 20 天还没续上时，每天提醒一次")}
+              </Group>
+              <Group title="安全">
+                {sw('panel_denied', '面板访问被拒', '有人尝试从不允许的地区 / 设备打开面板')}
+                {sw('approval_pending', '待审批', '普通管理员提交了需要你确认的操作')}
+              </Group>
+              <div className="grid gap-3 pt-3 sm:grid-cols-2">
+                <Field label="免打扰开始" hint="留空则不启用"><Input type="time" value={rules.quiet_from} onChange={(e) => setRules({ ...rules, quiet_from: e.target.value })} /></Field>
+                <Field label="免打扰结束"><Input type="time" value={rules.quiet_to} onChange={(e) => setRules({ ...rules, quiet_to: e.target.value })} /></Field>
               </div>
             </div>
           )}
@@ -152,3 +168,62 @@ export default function Alerts() {
   )
 }
 
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-0.5 border-b pb-2 pt-2 first:pt-0">
+      <div className="text-xs font-medium text-muted-foreground">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+type Pickable = { ip: string; mac: string; name: string; online: boolean }
+
+// SpikeOptions: window, the default threshold, devices left out, and per-device thresholds.
+function SpikeOptions({ rules, setRules, devices }: { rules: Rules; setRules: (r: Rules) => void; devices: Pickable[] }) {
+  const [pick, setPick] = useState('')
+  const unit = rules.spike_window === 'day' ? 'MB / 天' : 'MB / 小时'
+  const custom = Object.entries(rules.spike_custom ?? {})
+  const nameOf = (mac: string) => devices.find((d) => d.mac === mac)?.name || mac
+  return (
+    <div className="grid gap-3 rounded-lg bg-muted/40 p-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="统计时段">
+          <div className="flex gap-1.5">
+            {([['hour', '每小时（整点重新算）'], ['day', '每天（零点重新算）']] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setRules({ ...rules, spike_window: k })}
+                className={`rounded-md border px-2.5 py-1 text-xs ${rules.spike_window === k ? 'border-primary bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{l}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label={`默认阈值（${unit}）`}>
+          <Input type="number" min={100} value={rules.spike_mb_per_hour} onChange={(e) => setRules({ ...rules, spike_mb_per_hour: Number(e.target.value) })} />
+        </Field>
+      </div>
+      <Field label="单独设阈值的设备" hint="例如电视、游戏机用得多，可以给更高的阈值">
+        <div className="grid gap-1.5">
+          {custom.map(([mac, mb]) => (
+            <div key={mac} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate">{nameOf(mac)}</span>
+              <Input type="number" min={100} className="h-8 w-28" value={mb}
+                onChange={(e) => setRules({ ...rules, spike_custom: { ...rules.spike_custom, [mac]: Number(e.target.value) } })} />
+              <span className="text-xs text-muted-foreground">{unit}</span>
+              <Button variant="ghost" size="icon-sm" onClick={() => { const c = { ...rules.spike_custom }; delete c[mac]; setRules({ ...rules, spike_custom: c }) }}><Trash2 /></Button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <select className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm" value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">选择设备…</option>
+              {devices.filter((d) => !(d.mac in (rules.spike_custom ?? {}))).map((d) => <option key={d.mac} value={d.mac}>{d.name || d.mac} · {d.ip}</option>)}
+            </select>
+            <Button size="sm" variant="outline" disabled={!pick} onClick={() => { setRules({ ...rules, spike_custom: { ...rules.spike_custom, [pick]: rules.spike_mb_per_hour * 2 } }); setPick('') }}><Plus /> 添加</Button>
+          </div>
+        </div>
+      </Field>
+      <Field label="不提醒的设备" hint="例如 NAS、备份机、PVE：大流量是正常的">
+        <DevicePicker devices={devices} value={rules.spike_exclude ?? []} onChange={(v) => setRules({ ...rules, spike_exclude: v })} />
+      </Field>
+    </div>
+  )
+}

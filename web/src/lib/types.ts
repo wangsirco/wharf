@@ -30,6 +30,7 @@ export interface SystemInfo {
 export interface Device {
   mac: string; ip: string; hostname: string; static_name: string; lease_expiry: number
   neigh_state: string; online: boolean; last_seen?: number; static: boolean; static_id?: string
+  presence?: 'home' | 'away'; away_since?: number
   owner_id?: number; owner_name?: string; editable: boolean
   name: string; alias: string; note: string; type: string; os: string; vendor: string; type_by: string; random_mac: boolean; vm_tag?: string; guest_name?: string
   first_seen: number; is_new: boolean; controlled: boolean; blocked: boolean; blocked_by: string
@@ -110,7 +111,7 @@ export interface Catalog { categories: string[]; companies: string[]; version: s
 export interface PolicySchedule { days: number[]; start: string; end: string }
 export interface DevicePolicy {
   mac: string; name: string; block: boolean; mode: 'none' | 'blacklist' | 'whitelist'; targets: string[]
-  schedules: PolicySchedule[]; captive: boolean; force_dns: boolean; router_ports: string[]
+  schedules: PolicySchedule[]; captive: boolean; force_dns: boolean; router_ports: string[]; block_router?: boolean
   exists: boolean; owner_id: number; owner_name: string; editable: boolean
   status: { blocked: boolean; reason: string } | null
 }

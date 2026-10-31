@@ -183,6 +183,10 @@ var migrations = []string{
 	 CREATE TABLE ddns_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ddns_id INTEGER NOT NULL, ts INTEGER NOT NULL, ip TEXT NOT NULL, ok INTEGER NOT NULL,
 		msg TEXT NOT NULL DEFAULT '');
 	 CREATE INDEX ddns_log_id ON ddns_log(ddns_id, ts)`,
+	// v17: internet and WAN line events (for the dashboard)
+	`CREATE TABLE net_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+		detail TEXT NOT NULL DEFAULT '');
+	 CREATE INDEX net_events_ts ON net_events(ts)`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

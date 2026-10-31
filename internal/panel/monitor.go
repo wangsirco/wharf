@@ -200,10 +200,14 @@ func (a *App) monitorAlert(m Monitor, r MonRow) {
 	switch {
 	case s <= -2 && m.State != "bad":
 		_, _ = a.db.Exec(`UPDATE monitors SET state='bad', state_since=? WHERE id=?`, r.TS, m.ID)
-		a.notify("monitor", "监控异常："+m.Name, fmt.Sprintf("%s（%s）连续两次检测异常：%s", m.Name, target, why), false)
+		if a.alertRules().Monitor {
+			a.notify("monitor", "监控异常："+m.Name, fmt.Sprintf("%s（%s）连续两次检测异常：%s", m.Name, target, why), false)
+		}
 	case s >= 2 && m.State == "bad":
 		_, _ = a.db.Exec(`UPDATE monitors SET state='ok', state_since=? WHERE id=?`, r.TS, m.ID)
-		a.notify("monitor", "监控恢复："+m.Name, fmt.Sprintf("%s（%s）已恢复：%s，异常持续 %s", m.Name, target, why, awayText(r.TS-m.Since)), false)
+		if a.alertRules().Monitor {
+			a.notify("monitor", "监控恢复："+m.Name, fmt.Sprintf("%s（%s）已恢复：%s，异常持续 %s", m.Name, target, why, awayText(r.TS-m.Since)), false)
+		}
 	case m.State == "unknown" && (s >= 2 || s <= -2):
 		st := "ok"
 		if s < 0 {

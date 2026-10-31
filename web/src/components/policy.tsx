@@ -93,6 +93,9 @@ export function PolicyEditor({ mac, name }: { mac: string; name: string }) {
         <div className="min-w-0 flex-1">
           <div className="font-medium">{st?.blocked ? (st.reason === 'schedule' ? '定时断网中' : '已断网') : '可以上网'}</div>
           <div className="text-xs text-muted-foreground">
+            {form.block_router ? '断网时：外网和路由器都不能访问（仍能获取 IP 和解析域名）；家里其他设备照常互访。' : '断网只断外网：家里的 NAS、打印机、投屏等内网设备照常能访问，路由器后台也能打开。'}
+          </div>
+          <div className="text-xs text-muted-foreground">
             {data.exists ? `管控规则由 ${data.owner_name || '超级管理员'} 设置` : '该设备还没有管控规则'}
             {!editable && data.exists && ' · 你只能查看'}
           </div>
@@ -105,8 +108,12 @@ export function PolicyEditor({ mac, name }: { mac: string; name: string }) {
       </div>
 
       <fieldset disabled={!editable || busy} className="grid gap-4 xl:grid-cols-2">
-        <Section title="断网选项">
+        <Section title="断网选项" desc="对「立即断网」和「定时断网」都生效">
           <div className="grid gap-4 p-4">
+            <label className="flex items-start justify-between gap-4">
+              <span><span className="text-sm">同时禁止访问路由器</span><span className="block text-xs text-muted-foreground">断网时连路由器后台、面板、共享盘等也不能访问；仍可获取 IP 和解析域名，家里设备之间的互访不受影响（它们不经过路由器的防火墙）。不能对你正在使用的设备开启。</span></span>
+              <Switch checked={!!form.block_router} onCheckedChange={(c) => set('block_router', !!c)} />
+            </label>
             <label className="flex items-start justify-between gap-4">
               <span><span className="text-sm">骗过联网检测</span><span className="block text-xs text-muted-foreground">断网时仍放行 Apple / Android / Windows / 小米等系统的联网检测地址，设备会显示「已连接互联网」，但打不开任何内容。</span></span>
               <Switch checked={form.captive} onCheckedChange={(c) => set('captive', !!c)} />

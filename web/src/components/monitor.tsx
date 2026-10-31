@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowDown, ArrowUp, Ban, Bell, ClipboardCheck, Globe2, House, Info, LogOut, MonitorSmartphone, ShieldAlert, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Ban, Bell, ClipboardCheck, Globe2, House, Info, LogOut, MonitorSmartphone, ShieldAlert, Sparkles, Wifi, WifiOff } from 'lucide-react'
 import { get } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { useLive } from '@/lib/live'
@@ -85,12 +85,17 @@ export function LiveDevices({ limit = 8, big }: { limit?: number; big?: boolean 
 
 const EVENT_ICON: Record<string, typeof Bell> = { left: LogOut, back: House,
   new_device: MonitorSmartphone, control: Ban, schedule: Ban, forward: Globe2, access: ShieldAlert, approval: ClipboardCheck, rules: Sparkles,
+  wan_down: WifiOff, wan_up: Wifi, line_down: WifiOff, line_up: Wifi,
 }
 
-export function EventsFeed({ limit = 15, poll = 30000 }: { limit?: number; poll?: number }) {
-  const { data } = useApi<OwpEvent[]>(`/events?limit=${limit}`, poll)
+// event filters (server-side groups, see eventGroups in overview.go)
+export const EVENT_GROUPS: [string, string][] = [['', '全部'], ['presence', '离开 / 回来'], ['new', '新设备'], ['network', '断网 / 线路'],
+  ['control', '管控'], ['security', '安全与审批'], ['other', '其他']]
+
+export function EventsFeed({ limit = 15, poll = 30000, group = '' }: { limit?: number; poll?: number; group?: string }) {
+  const { data } = useApi<OwpEvent[]>(`/events?limit=${limit}${group ? `&group=${group}` : ''}`, poll)
   const navigate = useNavigate()
-  if (!data?.length) return <Empty>最近 7 天没有事件</Empty>
+  if (!data?.length) return <Empty>最近 7 天没有{group ? '这类' : ''}事件</Empty>
   return (
     <div className="divide-y">
       {data.map((e, i) => {
@@ -99,7 +104,7 @@ export function EventsFeed({ limit = 15, poll = 30000 }: { limit?: number; poll?
           <button key={i} type="button" disabled={!e.link} onClick={() => e.link && navigate(e.link)} className="flex w-full items-start gap-3 px-4 py-2.5 text-left enabled:hover:bg-muted/50">
             <span className={cn('mt-0.5 grid size-7 shrink-0 place-items-center rounded-full',
               e.level === 'alert' ? 'bg-destructive/12 text-destructive' : e.level === 'warn' ? 'bg-warning/20 text-[color-mix(in_oklch,var(--warning),black_35%)] dark:text-warning'
-                : e.kind === 'back' ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground')}>
+                : e.kind === 'back' || e.kind.endsWith('_up') ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground')}>
               {e.level === 'alert' ? <AlertTriangle className="size-3.5" /> : <Icon className="size-3.5" />}
             </span>
             <div className="min-w-0 flex-1">

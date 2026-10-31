@@ -33,6 +33,9 @@ type DevicePolicy struct {
 	Captive     bool             `json:"captive"`
 	ForceDNS    bool             `json:"force_dns"`
 	RouterPorts []string         `json:"router_ports"`
+	// BlockRouter: while cut off (now or on a schedule) the device cannot reach the
+	// router either (only DHCP and DNS stay open); blocking alone only cuts the internet
+	BlockRouter bool `json:"block_router"`
 	// read-only
 	Exists    bool   `json:"exists"`
 	OwnerID   int64  `json:"owner_id"`
@@ -79,7 +82,7 @@ func parseScheduleString(v string) PolicySchedule {
 func policyFromSection(s Section) DevicePolicy {
 	p := DevicePolicy{MAC: optStr(s, "mac"), Name: optStr(s, "name"), Block: optStr(s, "block") == "1", Mode: optStr(s, "mode"),
 		Targets: optList(s, "target"), Captive: optStr(s, "captive") != "0", ForceDNS: optStr(s, "force_dns") != "0",
-		RouterPorts: optList(s, "router_port"), Schedules: []PolicySchedule{}, Exists: true}
+		RouterPorts: optList(s, "router_port"), BlockRouter: optStr(s, "block_router") == "1", Schedules: []PolicySchedule{}, Exists: true}
 	if p.Mode == "" {
 		p.Mode = "none"
 	}
@@ -313,7 +316,7 @@ func runPolicy(a *App, ac actor, raw json.RawMessage) (any, error) {
 	have := all[sec]
 	want := map[string]any{
 		"mac": p.MAC, "name": p.Name, "block": boolStr(p.Block), "mode": p.Mode,
-		"captive": boolStr(p.Captive), "force_dns": boolStr(p.ForceDNS),
+		"captive": boolStr(p.Captive), "force_dns": boolStr(p.ForceDNS), "block_router": boolStr(p.BlockRouter),
 	}
 	lists := map[string][]string{"target": p.Targets, "domain": ex.domains, "cidr": ex.cidrs, "router_port": p.RouterPorts}
 	for _, s := range p.Schedules {
@@ -438,6 +441,9 @@ func (a *App) policySelfCheck(r *http.Request, raw json.RawMessage) error {
 	_, port, _ := net.SplitHostPort(a.cfg.Listen)
 	if slices.Contains(p.RouterPorts, port) {
 		return errors.New("不能禁止你当前使用的设备访问面板端口")
+	}
+	if p.BlockRouter && (p.Block || len(p.Schedules) > 0) {
+		return errors.New("你正在用这台设备操作面板：断网时一并禁止访问路由器，会让你打不开面板。请换一台设备设置")
 	}
 	return nil
 }

@@ -30,18 +30,31 @@ type AlertRules struct {
 	PresenceWatch []string `json:"presence_watch"` // MACs
 	AwayMinutes   int      `json:"away_minutes"`   // = setting presence.away_minutes (shown here)
 	// ≤ 0.18: one watch list for "offline" and "back online"; moved to the fields above
-	OfflineWatch    []string `json:"offline_watch,omitempty"`
-	OfflineMinutes  int      `json:"offline_minutes,omitempty"`
-	TrafficSpike    bool     `json:"traffic_spike"`
-	SpikeMBPerHour  int      `json:"spike_mb_per_hour"`
-	PanelDenied     bool     `json:"panel_denied"`
-	ApprovalPending bool     `json:"approval_pending"`
-	QuietFrom       string   `json:"quiet_from"` // "23:00"; empty = no quiet hours
-	QuietTo         string   `json:"quiet_to"`
+	OfflineWatch   []string `json:"offline_watch,omitempty"`
+	OfflineMinutes int      `json:"offline_minutes,omitempty"`
+	TrafficSpike   bool     `json:"traffic_spike"`
+	SpikeMBPerHour int      `json:"spike_mb_per_hour"` // the threshold, per SpikeWindow despite the name
+	// SpikeWindow: "hour" (this clock hour) or "day" (since midnight)
+	SpikeWindow  string         `json:"spike_window"`
+	SpikeExclude []string       `json:"spike_exclude"` // MACs never reported (backups, NAS …)
+	SpikeCustom  map[string]int `json:"spike_custom"`  // MAC -> own threshold in MB
+	// new devices with a randomised ("private") MAC: one that matches a known device's
+	// hostname is that device with a new address and is never reported; this skips the rest too
+	NewDeviceSkipRandom bool   `json:"new_device_skip_random"`
+	WanLine             bool   `json:"wan_line"`    // one of several WAN lines down / back
+	DDNSFail            bool   `json:"ddns_fail"`   // DDNS update failed
+	Monitor             bool   `json:"monitor"`     // scheduled monitors down / recovered
+	ProxyUsers          bool   `json:"proxy_users"` // proxy users: quota, expiry, IP limit (and early warnings)
+	ProxyCert           bool   `json:"proxy_cert"`  // proxy certificates not renewing
+	PanelDenied         bool   `json:"panel_denied"`
+	ApprovalPending     bool   `json:"approval_pending"`
+	QuietFrom           string `json:"quiet_from"` // "23:00"; empty = no quiet hours
+	QuietTo             string `json:"quiet_to"`
 }
 
 var defaultRules = AlertRules{NewDevice: true, WanDown: true, WanDownMinutes: 2, DeviceLeft: true, DeviceBack: true,
-	TrafficSpike: false, SpikeMBPerHour: 2048, PanelDenied: true, ApprovalPending: true}
+	TrafficSpike: false, SpikeMBPerHour: 2048, SpikeWindow: "hour", PanelDenied: true, ApprovalPending: true,
+	WanLine: true, DDNSFail: true, Monitor: true, ProxyUsers: true, ProxyCert: true}
 
 type AlertChannel struct {
 	ID      int64  `json:"id"`
@@ -61,6 +74,15 @@ func (a *App) alertRules() AlertRules {
 	r.OfflineWatch, r.OfflineMinutes = nil, 0
 	if r.PresenceWatch == nil {
 		r.PresenceWatch = []string{}
+	}
+	if r.SpikeExclude == nil {
+		r.SpikeExclude = []string{}
+	}
+	if r.SpikeCustom == nil {
+		r.SpikeCustom = map[string]int{}
+	}
+	if r.SpikeWindow != "day" {
+		r.SpikeWindow = "hour"
 	}
 	r.AwayMinutes = a.settingInt("presence.away_minutes")
 	return r
@@ -180,6 +202,9 @@ func (a *App) inQuiet(r AlertRules, t time.Time) bool {
 
 // notify sends to every enabled channel and logs the result. urgent alerts ignore quiet hours.
 func (a *App) notify(kind, title, body string, urgent bool) {
+	if !slices.ContainsFunc(a.alertChannels(false), func(c AlertChannel) bool { return c.Enabled }) {
+		return // nowhere to send: no log entry either
+	}
 	r := a.alertRules()
 	quiet := !urgent && a.inQuiet(r, time.Now())
 	var results []string
@@ -207,11 +232,14 @@ type alertState struct {
 	mu        sync.Mutex
 	lastCheck int64
 	wanDown   bool
-	spikeSent map[string]int64 // mac -> hour alerted
+	spikeSent map[string]int64 // mac -> window alerted
+	lineDown  map[string]int64 // WAN interface -> down since (0 = up)
+	lineSent  map[string]bool
+	lineSeen  bool
 }
 
 func (a *App) alertEngine() {
-	st := &alertState{lastCheck: time.Now().Unix(), spikeSent: map[string]int64{}}
+	st := &alertState{lastCheck: time.Now().Unix(), spikeSent: map[string]int64{}, lineDown: map[string]int64{}, lineSent: map[string]bool{}}
 	time.Sleep(90 * time.Second)
 	for {
 		func() {
@@ -220,9 +248,7 @@ func (a *App) alertEngine() {
 					log.Printf("alerts: %v", r)
 				}
 			}()
-			if len(a.alertChannels(false)) > 0 {
-				a.alertTick(st)
-			}
+			a.alertTick(st) // also without channels: it records the network events
 		}()
 		time.Sleep(time.Minute)
 	}
@@ -306,13 +332,20 @@ func (a *App) alertTick(st *alertState) {
 			rows.Close()
 			for _, d := range list {
 				id := a.identifyDevice(d.mac, d.name, "")
+				note := ""
+				if id.Random {
+					if a.knownByName(d.mac, d.name) || r.NewDeviceSkipRandom {
+						continue // a known phone / laptop that picked a new private address
+					}
+					note = "\n随机（私有）MAC：可能是手机或电脑开启了「私有地址」"
+				}
 				a.notify("new_device", "新设备接入："+firstNonEmpty(displayName("", "", d.name, id), d.mac),
-					fmt.Sprintf("IP %s\nMAC %s\n类型 %s %s", d.ip, d.mac, id.Type, id.Vendor), false)
+					fmt.Sprintf("IP %s\nMAC %s\n类型 %s %s%s", d.ip, d.mac, id.Type, id.Vendor, note), false)
 			}
 		}
 	}
 
-	if r.WanDown {
+	{
 		n := r.WanDownMinutes
 		if n < 1 {
 			n = 2
@@ -324,39 +357,23 @@ func (a *App) alertTick(st *alertState) {
 			WHERE minute >= ? GROUP BY minute)`, now-int64(n)*60-90).Scan(&total, &down)
 		isDown := total >= n && down >= n
 		if isDown && !st.wanDown {
-			a.notify("wan_down", "家里断网了", fmt.Sprintf("所有检测目标已连续 %d 分钟无法访问（%s）", n, time.Now().Format("15:04")), true)
+			a.netEvent(now, "wan_down", "家里断网了", fmt.Sprintf("所有检测目标连续 %d 分钟无法访问", n))
+			if r.WanDown {
+				a.notify("wan_down", "家里断网了", fmt.Sprintf("所有检测目标已连续 %d 分钟无法访问（%s）", n, time.Now().Format("15:04")), true)
+			}
 		}
 		if !isDown && st.wanDown && total > 0 {
-			a.notify("wan_up", "网络已恢复", "公网连接恢复正常（"+time.Now().Format("15:04")+"）", true)
+			a.netEvent(now, "wan_up", "网络已恢复", "公网连接恢复正常")
+			if r.WanDown {
+				a.notify("wan_up", "网络已恢复", "公网连接恢复正常（"+time.Now().Format("15:04")+"）", true)
+			}
 		}
 		st.wanDown = isDown
 	}
+	a.lineTick(st, r, now)
 
 	if r.TrafficSpike && r.SpikeMBPerHour > 0 {
-		hour := now - now%3600
-		rows, err := a.db.Query(`SELECT mac, up+down FROM traffic_hour WHERE hour=? AND up+down > ?`, hour, int64(r.SpikeMBPerHour)<<20)
-		if err == nil {
-			type sp struct {
-				mac string
-				b   int64
-			}
-			var list []sp
-			for rows.Next() {
-				var s sp
-				if rows.Scan(&s.mac, &s.b) == nil {
-					list = append(list, s)
-				}
-			}
-			rows.Close()
-			for _, s := range list {
-				if st.spikeSent[s.mac] == hour {
-					continue
-				}
-				st.spikeSent[s.mac] = hour
-				a.notify("traffic_spike", "流量异常："+a.deviceLabel(s.mac),
-					fmt.Sprintf("本小时已使用 %.1f GB，超过阈值 %d MB", float64(s.b)/(1<<30), r.SpikeMBPerHour), false)
-			}
-		}
+		a.spikeTick(st, r, now)
 	}
 
 	if r.PanelDenied {
@@ -384,6 +401,116 @@ func (a *App) alertTick(st *alertState) {
 			}
 		}
 	}
+}
+
+var dailySent sync.Map // key -> day number
+
+// notifyDaily sends a recurring problem at most once a day.
+func (a *App) notifyDaily(key, kind, title, body string) {
+	day := time.Now().Unix() / 86400
+	if v, ok := dailySent.Load(key); ok && v.(int64) == day {
+		return
+	}
+	dailySent.Store(key, day)
+	a.notify(kind, title, body, false)
+}
+
+// knownByName: another device already seen with this hostname (a phone that switched to
+// a new private MAC keeps its name).
+func (a *App) knownByName(mac, name string) bool {
+	if strings.TrimSpace(name) == "" || name == "*" {
+		return false
+	}
+	var n int
+	_ = a.db.QueryRow(`SELECT COUNT(*) FROM devices_seen WHERE name=? AND mac<>?`, name, mac).Scan(&n)
+	return n > 0
+}
+
+// spikeTick: devices over their threshold in this hour or day (each reported once per window).
+func (a *App) spikeTick(st *alertState, r AlertRules, now int64) {
+	start, per := now-now%3600, "本小时"
+	if r.SpikeWindow == "day" {
+		t := time.Unix(now, 0)
+		start, per = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local).Unix(), "今天"
+	}
+	rows, err := a.db.Query(`SELECT mac, SUM(up+down) FROM traffic_hour WHERE hour >= ? GROUP BY mac`, start)
+	if err != nil {
+		return
+	}
+	type sp struct {
+		mac string
+		b   int64
+	}
+	var list []sp
+	for rows.Next() {
+		var x sp
+		if rows.Scan(&x.mac, &x.b) == nil {
+			list = append(list, x)
+		}
+	}
+	rows.Close()
+	for _, x := range list {
+		limit := r.SpikeMBPerHour
+		if c, ok := r.SpikeCustom[x.mac]; ok && c > 0 {
+			limit = c
+		}
+		if slices.Contains(r.SpikeExclude, x.mac) || x.b <= int64(limit)<<20 || st.spikeSent[x.mac] == start {
+			continue
+		}
+		st.spikeSent[x.mac] = start
+		a.notify("traffic_spike", "流量异常："+a.deviceLabel(x.mac),
+			fmt.Sprintf("%s已使用 %s，超过阈值 %d MB", per, humanBytes(x.b), limit), false)
+	}
+}
+
+// lineTick: with several WAN lines, one going down (or back) is worth knowing even while
+// the others keep the home online.
+func (a *App) lineTick(st *alertState, r AlertRules, now int64) {
+	var wans []wanInfo
+	for _, w := range a.wans() { // wan6 & co. are the same line as their IPv4 sibling
+		if !strings.HasPrefix(w.Proto, "dhcpv6") && !slices.Contains([]string{"6in4", "6to4", "6rd", "dslite"}, w.Proto) {
+			wans = append(wans, w)
+		}
+	}
+	if len(wans) == 0 {
+		return
+	}
+	n := int64(max(r.WanDownMinutes, 1))
+	for _, w := range wans {
+		if w.Up {
+			if st.lineSent[w.Interface] && st.lineDown[w.Interface] > 0 {
+				out := now - st.lineDown[w.Interface]
+				a.netEvent(now, "line_up", "线路恢复："+w.Interface, "中断了 "+awayText(out))
+				if r.WanLine && len(wans) > 1 {
+					a.notify("line_up", "线路恢复："+w.Interface, fmt.Sprintf("%s 已恢复，中断了 %s", w.Interface, awayText(out)), true)
+				}
+			}
+			delete(st.lineDown, w.Interface)
+			delete(st.lineSent, w.Interface)
+			continue
+		}
+		if !st.lineSeen { // already down when the panel started (or unused): no event either way
+			st.lineSent[w.Interface] = true
+			continue
+		}
+		if st.lineDown[w.Interface] == 0 {
+			st.lineDown[w.Interface] = now
+		}
+		if !st.lineSent[w.Interface] && now-st.lineDown[w.Interface] >= n*60 {
+			st.lineSent[w.Interface] = true
+			a.netEvent(st.lineDown[w.Interface], "line_down", "线路掉线："+w.Interface, firstNonEmpty(w.Device, w.Proto))
+			if r.WanLine && len(wans) > 1 {
+				a.notify("line_down", "线路掉线："+w.Interface, fmt.Sprintf("%s（%s）已断开超过 %d 分钟；其他线路仍在工作", w.Interface, firstNonEmpty(w.Device, w.Proto), n), true)
+			}
+		}
+	}
+	st.lineSeen = true
+}
+
+// netEvent records an internet / line event for the dashboard.
+func (a *App) netEvent(ts int64, kind, title, detail string) {
+	_, _ = a.db.Exec(`INSERT INTO net_events(ts, kind, title, detail) VALUES(?,?,?,?)`, ts, kind, title, detail)
+	_, _ = a.db.Exec(`DELETE FROM net_events WHERE ts < ?`, ts-90*86400)
 }
 
 // ---- HTTP (super admin) ----
@@ -429,6 +556,14 @@ func (a *App) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 		req.PresenceWatch = []string{}
 	}
 	req.OfflineWatch, req.OfflineMinutes = nil, 0
+	if req.SpikeWindow != "day" {
+		req.SpikeWindow = "hour"
+	}
+	for mac, mb := range req.SpikeCustom {
+		if mb <= 0 {
+			delete(req.SpikeCustom, mac)
+		}
+	}
 	if req.AwayMinutes != 0 && req.AwayMinutes != a.settingInt("presence.away_minutes") {
 		v := strconv.Itoa(req.AwayMinutes)
 		if err := validSetting("presence.away_minutes", v); err != nil {

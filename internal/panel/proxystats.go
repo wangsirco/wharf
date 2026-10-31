@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -66,7 +67,8 @@ func (a *App) proxyLoop() {
 				log.Printf("proxy: reapply after Cloudflare ranges changed: %v", err)
 			}
 		}
-		if tick%120 == 1 {
+		if tick%120 == 1 { // hourly
+			a.checkProxyCerts()
 			days := a.proxySettings().AccessDays
 			_, _ = a.db.Exec(`DELETE FROM proxy_access WHERE ts < ?`, time.Now().Unix()-int64(days)*86400)
 			_, _ = a.db.Exec(`DELETE FROM proxy_access WHERE id <= (SELECT id FROM proxy_access ORDER BY id DESC LIMIT 1 OFFSET 2000000)`)
@@ -181,9 +183,63 @@ func (a *App) enforceIPLimits(online map[string]map[string]int64, blocked map[st
 		}
 		if len(cut) > 0 {
 			log.Printf("proxy: user %d over IP limit, refused %v", u.ID, cut)
-			a.notify("proxy", "代理用户超出同时在线 IP 限制",
+			a.proxyNotify("代理用户超出同时在线 IP 限制",
 				fmt.Sprintf("「%s」同时从 %d 个 IP 连接（限制 %d），已拒绝：%s", u.Name, len(ips), u.IPLimit, strings.Join(cut, "、")), false)
 		}
+	}
+}
+
+func (a *App) proxyNotify(title, body string, urgent bool) {
+	if a.alertRules().ProxyUsers {
+		a.notify("proxy", title, body, urgent)
+	}
+}
+
+// proxyWarnOnce sends an early warning once per key (kept in the settings so a restart
+// does not repeat it).
+func (a *App) proxyWarnOnce(key, title, body string) {
+	var sent []string
+	_ = json.Unmarshal([]byte(a.setting("alerts.proxy_warned")), &sent)
+	if slices.Contains(sent, key) {
+		return
+	}
+	sent = append(sent, key)
+	if len(sent) > 200 {
+		sent = sent[len(sent)-200:]
+	}
+	_ = a.setSetting("alerts.proxy_warned", mustJSON(sent))
+	a.proxyNotify(title, body, false)
+}
+
+// checkProxyCerts warns about public certificates that are not being renewed (the front
+// renews 30 days ahead; still under 20 days left means renewal keeps failing).
+func (a *App) checkProxyCerts() {
+	if !a.alertRules().ProxyCert {
+		return
+	}
+	var certs []struct {
+		Domain     string `json:"domain"`
+		NotAfter   int64  `json:"not_after"`
+		SelfSigned bool   `json:"self_signed"`
+		Status     string `json:"status"`
+	}
+	if a.agent.Do("GET", "/v1/proxy/certs", nil, &certs) != nil {
+		return
+	}
+	now := time.Now()
+	for _, c := range certs {
+		if c.SelfSigned || c.NotAfter == 0 {
+			continue
+		}
+		left := time.Unix(c.NotAfter, 0).Sub(now)
+		if left > 20*24*time.Hour {
+			continue
+		}
+		msg := fmt.Sprintf("%s 的 Let's Encrypt 证书还有 %s 到期，自动续期没有成功。请检查公网 443 是否能从外面连到分流器、域名是否仍解析到路由器", c.Domain, awayText(int64(max(left, 0).Seconds())))
+		if c.Status != "" {
+			msg += "（" + c.Status + "）"
+		}
+		a.notifyDaily("proxy_cert:"+c.Domain, "proxy_cert", "代理证书没有续期", msg)
 	}
 }
 
@@ -215,11 +271,19 @@ func (a *App) enforceProxyLimits() {
 		}
 		if u.Stopped == "" && u.LimitBytes > 0 && u.UsedUp+u.UsedDown >= u.LimitBytes {
 			u.Stopped = "quota"
-			a.notify("proxy", "代理用户流量用完", fmt.Sprintf("「%s」已用 %s，达到上限，已自动暂停", u.Name, humanBytes(u.UsedUp+u.UsedDown)), false)
+			a.proxyNotify("代理用户流量用完", fmt.Sprintf("「%s」已用 %s，达到上限，已自动暂停", u.Name, humanBytes(u.UsedUp+u.UsedDown)), false)
+		}
+		if u.Stopped == "" && u.LimitBytes > 0 && u.UsedUp+u.UsedDown >= u.LimitBytes*8/10 {
+			a.proxyWarnOnce(fmt.Sprintf("q80:%d:%d", u.ID, u.PeriodAt), "代理用户流量快用完",
+				fmt.Sprintf("「%s」已用 %s，达到上限 %s 的 80%%", u.Name, humanBytes(u.UsedUp+u.UsedDown), humanBytes(u.LimitBytes)))
+		}
+		if u.Stopped == "" && u.ExpireAt > now && u.ExpireAt-now <= 3*86400 {
+			a.proxyWarnOnce(fmt.Sprintf("exp:%d:%d", u.ID, u.ExpireAt), "代理用户即将到期",
+				fmt.Sprintf("「%s」将在 %s 到期（还有 %s）", u.Name, time.Unix(u.ExpireAt, 0).Format("01-02 15:04"), awayText(u.ExpireAt-now)))
 		}
 		if u.Stopped == "" && u.ExpireAt > 0 && u.ExpireAt <= now {
 			u.Stopped = "expired"
-			a.notify("proxy", "代理用户已到期", fmt.Sprintf("「%s」已到期，已自动暂停", u.Name), false)
+			a.proxyNotify("代理用户已到期", fmt.Sprintf("「%s」已到期，已自动暂停", u.Name), false)
 		}
 		if u.Stopped != was.Stopped || u.PeriodAt != was.PeriodAt {
 			_, _ = a.db.Exec(`UPDATE proxy_users SET stopped=?, used_up=?, used_down=?, period_at=? WHERE id=?`, u.Stopped, u.UsedUp, u.UsedDown, u.PeriodAt, u.ID)

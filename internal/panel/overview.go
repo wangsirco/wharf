@@ -2,8 +2,10 @@ package panel
 
 import (
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -72,13 +74,24 @@ type event struct {
 	Link   string `json:"link,omitempty"`
 }
 
-// GET /api/events?limit=
+// eventGroups are the dashboard's event filters.
+var eventGroups = map[string][]string{
+	"presence": {"left", "back"},
+	"new":      {"new_device"},
+	"network":  {"wan_down", "wan_up", "line_down", "line_up"},
+	"control":  {"control", "schedule"},
+	"security": {"access", "approval"},
+	"other":    {"forward", "rules"},
+}
+
+// GET /api/events?limit=&group=
 func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 200 {
 		limit = 40
 	}
+	only := eventGroups[r.URL.Query().Get("group")] // nil = all
 	since := time.Now().Unix() - 7*86400
 	var evs []event
 
@@ -109,6 +122,18 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	if u.Can("devices.view") {
 		evs = append(evs, a.presenceEvents(since, nameOf)...)
+	}
+	if rows, err := a.db.Query(`SELECT ts, kind, title, detail FROM net_events WHERE ts >= ? ORDER BY ts DESC LIMIT 100`, since); err == nil {
+		for rows.Next() {
+			e := event{Level: "info", Link: "/network"}
+			if rows.Scan(&e.TS, &e.Kind, &e.Title, &e.Detail) == nil {
+				if strings.HasSuffix(e.Kind, "_down") {
+					e.Level = "alert"
+				}
+				evs = append(evs, e)
+			}
+		}
+		rows.Close()
 	}
 
 	// audit-derived events; normal admins only see their own actions
@@ -173,6 +198,9 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			rows.Close()
 		}
+	}
+	if only != nil {
+		evs = slices.DeleteFunc(evs, func(e event) bool { return !slices.Contains(only, e.Kind) })
 	}
 	sort.Slice(evs, func(i, j int) bool { return evs[i].TS > evs[j].TS })
 	if len(evs) > limit {

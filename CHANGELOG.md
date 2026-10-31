@@ -2,6 +2,13 @@
 
 ## Unreleased · 未发布
 
+- Every alert has its own switch (DDNS, monitors, proxy users, proxy certificates were always on) · 每类告警都能单独开关
+- Traffic-spike alerts per hour or per day, per-device thresholds and exclusions · 流量异常：按小时 / 天、单设备阈值、排除设备
+- New-device alerts recognise phones that switched to a new private MAC; optional ignore of randomised MACs · 新设备告警识别换了私有 MAC 的已知设备
+- Single WAN line down / back alerts and events with several lines · 多线路时单条线路掉线 / 恢复提醒与事件
+- Device list separates "not responding" from "left"; dashboard events filter by type and show more · 设备列表区分「暂时无响应」和「已离开」；最近事件可筛选
+- Proxy early warnings: 80 % traffic, expiring within 3 days, certificates not renewing · 代理提前提醒
+- Blocking a device states that only the internet is cut; optional "also block the router" · 断网写清只断外网，可选同时禁止访问路由器
 - Alerts: separate "device left" and "device came back" switches for selected or all devices, driven by the same presence tracking as the dashboard and grouped per minute; "WAN down" renamed to make clear it is the whole home's internet · 告警：设备离开 / 回来分开设置，可选设备或全部设备，同一分钟合并；「断网 / 恢复」明确为整个家的外网
 
 ## 0.18.0 — proxy extension and DDNS · 代理扩展与动态域名

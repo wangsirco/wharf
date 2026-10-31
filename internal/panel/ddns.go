@@ -639,7 +639,7 @@ func (a *App) runDDNS(d *DDNS, force bool) (string, string, error) {
 	fail := func(err error) (string, string, error) {
 		_, _ = a.db.Exec(`UPDATE ddns SET last_run=?, last_err=? WHERE id=?`, now, err.Error(), d.ID)
 		logIt(false, err.Error())
-		if d.LastErr == "" { // only the first failure of a streak alerts
+		if d.LastErr == "" && a.alertRules().DDNSFail { // only the first failure of a streak alerts
 			a.notify("ddns", "DDNS 更新失败", fmt.Sprintf("%s：%v", d.Domain, err), false)
 		}
 		return ip, "", err

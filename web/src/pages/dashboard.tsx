@@ -1,10 +1,11 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowDown, Ban, ClipboardCheck, Cpu, Database, MemoryStick, Monitor, MonitorSmartphone, Network, ShieldAlert } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { bitrate, bytes, duration } from '@/lib/format'
 import { PageHeader } from '@/components/layout'
 import { ErrorBox, Section } from '@/components/common'
-import { EventsFeed, Kpi, LiveDevices, ServicesToday, useOverview, useWan, WanChart } from '@/components/monitor'
+import { EVENT_GROUPS, EventsFeed, Kpi, LiveDevices, ServicesToday, useOverview, useWan, WanChart } from '@/components/monitor'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -64,9 +65,7 @@ export default function Dashboard() {
             <div className="p-4"><ServicesToday data={ov ?? null} /></div>
           </Section>
         )}
-        <Section title="最近事件" desc="新设备、断网、定时、拒绝访问、审批" className={can('traffic.view') ? '' : 'xl:col-span-3'}>
-          <div className="max-h-[360px] overflow-y-auto"><EventsFeed limit={20} /></div>
-        </Section>
+        <RecentEvents className={can('traffic.view') ? '' : 'xl:col-span-3'} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -99,3 +98,27 @@ export default function Dashboard() {
 }
 
 export function DashboardError({ error }: { error: string }) { return <ErrorBox>{error}</ErrorBox> }
+
+// RecentEvents: the last 7 days, filterable by type; "more" loads up to 200.
+function RecentEvents({ className }: { className?: string }) {
+  const [group, setGroup] = useState('')
+  const [limit, setLimit] = useState(20)
+  return (
+    <Section title="最近事件" desc="最近 7 天：设备离开 / 回来、新设备、断网与线路、管控、访问拒绝与审批" className={className}>
+      <div className="flex flex-wrap gap-1.5 border-b px-4 py-2">
+        {EVENT_GROUPS.map(([k, l]) => (
+          <button key={k} type="button" onClick={() => { setGroup(k); setLimit(20) }}
+            className={`rounded-md border px-2 py-0.5 text-xs ${group === k ? 'border-primary bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{l}</button>
+        ))}
+      </div>
+      <div className="max-h-[360px] overflow-y-auto">
+        <EventsFeed limit={limit} group={group} />
+        {limit < 200 && (
+          <div className="border-t px-4 py-2 text-center">
+            <Button variant="ghost" size="sm" onClick={() => setLimit(200)}>查看更多</Button>
+          </div>
+        )}
+      </div>
+    </Section>
+  )
+}

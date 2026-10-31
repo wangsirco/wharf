@@ -201,7 +201,9 @@ Switch at the top right; the browser remembers your choice.
 - **Recent events:**
   - new devices
   - devices that left or came back (with how long they were away)
-  - WAN outages
+  - internet down / back, and single WAN lines down / back
+  - filters by type, and *more* shows up to 200 events of the last 7 days
+- **Device status:** in the device list, *online* means the router can reach it right now; *not responding* means it just went quiet (common for a dozing phone) and has not left yet; *left* means it has not been seen for the set time (10 minutes by default), which records a departure, and its return records an arrival.
   - schedules taking effect
   - denied panel access
   - approvals
@@ -302,7 +304,7 @@ On a device's page:
 
 From any device → *访问控制* (access control):
 
-- **Block** with one click.
+- **Block** with one click. It cuts the internet only: the NAS, printers, casting and other devices at home still work, and so does the router's web interface. With *also block the router* the device cannot reach the router either while it is blocked (now or on a schedule), apart from DHCP and DNS; it cannot be turned on for the device you are using.
 - **Deny / allow lists** by service (for example "TikTok" or "Games") or by domain. The ipsets are built dynamically from DNS answers.
 - **Schedules** by weekday and time, for example weekdays 22:00–07:00.
 - **Block access to router ports**, for example keep a device away from the router's SSH or LuCI.
@@ -379,10 +381,13 @@ All active controls are listed together on the *设备管控* page.
   - new device joined
   - internet down / back: the whole home's internet unreachable for N minutes, and again when it recovers
   - device left / came back (two separate switches): a device not seen on the network for N minutes (10 by default, the same rule as the dashboard's arrivals and departures) has left; when it shows up again it is back, with how long it was away. Either the selected devices (family phones, a NAS, cameras …) or every device; several devices in the same minute become one message. A watch list saved by 0.18 or earlier carries over
-  - a device used more than N MB in an hour
-  - panel access denied (someone tried to log in from somewhere not allowed)
-  - action waiting for approval
-  - monitor down / recovered
+  - single line down / back: with several WAN lines (multi-WAN / mwan3), one of them down for N minutes even though the home is still online; never sent with a single line
+  - new devices: phones and laptops with private addresses change MAC; one with the same name as a known device is recognised and not reported, and all randomised MACs can be ignored
+  - traffic spike, per hour or per day, with per-device thresholds (a TV, say) and devices left out (a NAS, backup machines)
+  - DDNS update failed; monitor down / recovered
+  - proxy users at 80 % and 100 % of their traffic, expiring within 3 days and expired, over their IP limit; proxy certificates with under 20 days left and not renewing (daily)
+  - panel access denied (someone tried to log in from somewhere not allowed); action waiting for approval
+  - every rule has its own switch
 - **Quiet hours:** urgent alerts such as WAN down are still sent.
 - **Log:** where every alert went and whether it succeeded.
 - Alert titles start with your panel name, for example "[Home] Monitor down: …".

@@ -26,6 +26,16 @@ export async function quickBlock(d: Pick<Device, 'mac' | 'name'>, on: boolean) {
   return runAction('device.policy.save', { ...p, name: p.name || d.name, block: on })
 }
 
+const STATUS_HINT = '在线：路由器此刻能联系到它。暂时无响应：刚刚联系不上（手机息屏常见），还不算离开。已离开：超过设定时间（默认 10 分钟）没出现，会记一次「离开」，再出现记「回来」。'
+
+// statusText: the instant view (online) and presence (left the network) in one phrase
+function statusText(d: Device) {
+  if (d.online) return '在线'
+  if (d.presence === 'away') return d.away_since ? `已离开 · ${ago(d.away_since)}` : '已离开'
+  if (d.last_seen) return `暂时无响应 · ${ago(d.last_seen)}在线`
+  return d.lease_expiry ? `不在线 · 租约至 ${datetime(d.lease_expiry).slice(5, 16)}` : '不在线'
+}
+
 export default function Devices() {
   const { data, error, reload } = useApi<Device[]>('/devices', 10000)
   const { can } = useAuth()
@@ -65,7 +75,7 @@ export default function Devices() {
             <TabsList>
               <TabsTrigger value="online">在线</TabsTrigger>
               <TabsTrigger value="all">全部</TabsTrigger>
-              <TabsTrigger value="offline">离线</TabsTrigger>
+              <TabsTrigger value="offline">不在线</TabsTrigger>
               <TabsTrigger value="new">新设备{newCount ? ` ${newCount}` : ''}</TabsTrigger>
               <TabsTrigger value="controlled">已管控</TabsTrigger>
               <TabsTrigger value="static">静态绑定</TabsTrigger>
@@ -120,8 +130,7 @@ export default function Devices() {
                 <TableCell className="hidden sm:table-cell">
                   {d.blocked ? <Pill tone="red"><Ban className="size-3" />{d.blocked_by === 'schedule' ? '定时断网' : '已断网'}</Pill>
                     : d.controlled ? <Pill tone="blue">已管控</Pill>
-                    : d.online ? <span className="text-xs text-muted-foreground">在线</span>
-                    : <span className="text-xs text-muted-foreground">{d.last_seen ? `离线 · ${ago(d.last_seen)}在线` : d.lease_expiry ? `租约至 ${datetime(d.lease_expiry).slice(5, 16)}` : '离线'}</span>}
+                    : <span className="text-xs text-muted-foreground" title={STATUS_HINT}>{statusText(d)}</span>}
                 </TableCell>
                 <TableCell className="pr-4 text-right" onClick={(e) => e.stopPropagation()}>
                   {can('access.manage') && (
@@ -184,7 +193,7 @@ export function DevicePanel({ device, onClose, canManage, onSaved }: { device: D
       {d && (
         <div className="grid gap-6">
           <dl className="grid grid-cols-[8rem_1fr] gap-y-2.5 text-sm">
-            <dt className="text-muted-foreground">状态</dt><dd>{d.online ? '在线' : '离线'}（{d.neigh_state || '无邻居记录'}）</dd>
+            <dt className="text-muted-foreground">状态</dt><dd title={STATUS_HINT}>{statusText(d)}<span className="text-muted-foreground">（{d.neigh_state || '无邻居记录'}）</span></dd>
             <dt className="text-muted-foreground">DHCP 主机名</dt><dd>{d.hostname || '—'}</dd>
             <dt className="text-muted-foreground">静态绑定名称</dt><dd>{d.static_name || '—'}</dd>
             <dt className="text-muted-foreground">IP 地址</dt><dd className="font-mono">{d.ip}</dd>
