@@ -1,5 +1,9 @@
 # Changelog · 更新日志
 
+## Unreleased · 未发布
+
+- Fix: adding a Telegram channel always failed with "格式不正确" (the Chat ID never reached the server). The Chat ID can now be left empty and is found from the bot's messages; the token may be pasted with a "bot" prefix or as a whole API address, and is checked with Telegram · 修复 Telegram 渠道总提示格式不正确；Chat ID 可自动获取
+
 ## 0.18.1 — sharper alerts and device status · 告警与设备状态细化
 
 - Every alert has its own switch (DDNS, monitors, proxy users, proxy certificates were always on) · 每类告警都能单独开关

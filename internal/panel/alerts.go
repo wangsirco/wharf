@@ -166,7 +166,7 @@ func sendTo(raw, title, body string) error {
 			return errors.New("Telegram 需要 Bot Token 和 Chat ID")
 		}
 		b, _ := json.Marshal(map[string]any{"chat_id": chat, "text": title + "\n" + body, "disable_web_page_preview": true})
-		resp, err := cl.Post("https://api.telegram.org/bot"+token+"/sendMessage", "application/json", bytes.NewReader(b))
+		resp, err := cl.Post(tgAPI+"/bot"+token+"/sendMessage", "application/json", bytes.NewReader(b))
 		if err != nil {
 			return errors.New("Telegram 不可达") // never echo the token-bearing URL
 		}
@@ -583,10 +583,130 @@ func (a *App) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a.alertRules())
 }
 
+// ---- Telegram helpers ----
+
+var tgAPI = "https://api.telegram.org" // replaced in tests
+
+var tgTokenRe = regexp.MustCompile(`\d{5,}:[A-Za-z0-9_-]{30,}`)
+
+// tgToken pulls the token out of whatever was pasted: the token itself, "bot<token>",
+// or a whole https://api.telegram.org/bot<token>/getUpdates address.
+func tgToken(s string) string {
+	return tgTokenRe.FindString(strings.TrimSpace(s))
+}
+
+type tgChat struct {
+	ID    int64  `json:"id"`
+	Type  string `json:"type"` // private | group | supergroup | channel
+	Title string `json:"title"`
+	Name  string `json:"name"`
+}
+
+// tgCall runs one Bot API method; the token never appears in an error.
+func tgCall(token, method string, out any) error {
+	cl := &http.Client{Timeout: 12 * time.Second}
+	resp, err := cl.Get(tgAPI + "/bot" + token + "/" + method)
+	if err != nil {
+		return errors.New("连不上 Telegram（api.telegram.org），请检查路由器能否访问 Telegram")
+	}
+	defer resp.Body.Close()
+	var r struct {
+		OK          bool            `json:"ok"`
+		Description string          `json:"description"`
+		Result      json.RawMessage `json:"result"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&r) != nil {
+		return errors.New("Telegram 返回了无法识别的内容")
+	}
+	if !r.OK {
+		if resp.StatusCode == 401 || resp.StatusCode == 404 {
+			return errors.New("Bot Token 无效：请从 @BotFather 重新复制（形如 123456789:AAE…）")
+		}
+		if resp.StatusCode == 409 {
+			return errors.New("这个机器人设置了 Webhook，无法自动获取 Chat ID，请手动填写")
+		}
+		return fmt.Errorf("Telegram：%s", r.Description)
+	}
+	return json.Unmarshal(r.Result, out)
+}
+
+type tgMsg struct {
+	Chat struct {
+		ID        int64  `json:"id"`
+		Type      string `json:"type"`
+		Title     string `json:"title"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
+	} `json:"chat"`
+}
+
+// tgChats: the bot's name and the chats that recently wrote to it (getUpdates keeps
+// messages for 24 hours).
+func tgChats(token string) (string, []tgChat, error) {
+	var me struct {
+		Username string `json:"username"`
+	}
+	if err := tgCall(token, "getMe", &me); err != nil {
+		return "", nil, err
+	}
+	type update struct {
+		Message      *tgMsg `json:"message"`
+		ChannelPost  *tgMsg `json:"channel_post"`
+		MyChatMember *tgMsg `json:"my_chat_member"`
+	}
+	var ups []update
+	if err := tgCall(token, "getUpdates", &ups); err != nil {
+		return me.Username, nil, err
+	}
+	var chats []tgChat
+	for i := len(ups) - 1; i >= 0; i-- { // newest first
+		for _, m := range []*tgMsg{ups[i].Message, ups[i].ChannelPost, ups[i].MyChatMember} {
+			if m == nil || slices.ContainsFunc(chats, func(c tgChat) bool { return c.ID == m.Chat.ID }) {
+				continue
+			}
+			c := m.Chat
+			name := strings.TrimSpace(c.FirstName + " " + c.LastName)
+			if c.Username != "" {
+				name = strings.TrimSpace(name + " @" + c.Username)
+			}
+			chats = append(chats, tgChat{ID: c.ID, Type: c.Type, Title: c.Title, Name: name})
+		}
+	}
+	return me.Username, chats, nil
+}
+
+// POST /api/alerts/telegram/chats {token} — finds the Chat ID so nobody has to.
+func (a *App) handleTelegramChats(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	_ = readJSON(r, &req)
+	token := tgToken(req.Token)
+	if token == "" {
+		jsonErr(w, 400, "Bot Token 格式不对：应形如 123456789:AAE…（从 @BotFather 复制）")
+		return
+	}
+	bot, chats, err := tgChats(token)
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	if chats == nil {
+		chats = []tgChat{}
+	}
+	writeJSON(w, 200, map[string]any{"bot": bot, "chats": chats})
+}
+
 // POST /api/alerts/channels {type: serverchan|telegram, name, key | token+chat_id}
+// An empty chat_id is looked up from the bot's recent messages.
 func (a *App) handleAlertChannelAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Type, Name, Key, Token, ChatID string
+		Type   string `json:"type"`
+		Name   string `json:"name"`
+		Key    string `json:"key"`
+		Token  string `json:"token"`
+		ChatID string `json:"chat_id"`
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
@@ -601,8 +721,31 @@ func (a *App) handleAlertChannelAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		u, req.Name = "serverchan://"+req.Key, firstNonEmpty(clean(req.Name, 40), "Server 酱")
 	case "telegram":
-		if !regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{20,}$`).MatchString(req.Token) || !regexp.MustCompile(`^-?\d+$|^@[A-Za-z0-9_]{4,}$`).MatchString(req.ChatID) {
-			jsonErr(w, 400, "Telegram Bot Token 或 Chat ID 格式不正确")
+		req.Token = tgToken(req.Token)
+		if req.Token == "" {
+			jsonErr(w, 400, "Bot Token 格式不对：应形如 123456789:AAE…（从 @BotFather 复制）")
+			return
+		}
+		req.ChatID = strings.TrimSpace(req.ChatID)
+		bot, chats, err := tgChats(req.Token) // also checks the token
+		if err != nil {
+			jsonErr(w, 400, err.Error())
+			return
+		}
+		if req.ChatID == "" {
+			switch len(chats) {
+			case 0:
+				jsonErr(w, 400, "还找不到你的 Chat ID：请先在 Telegram 里打开 @"+bot+"，点「开始」或随便发一条消息，再点添加")
+				return
+			case 1:
+				req.ChatID = strconv.FormatInt(chats[0].ID, 10)
+			default:
+				jsonErr(w, 400, "这个机器人收到过多个聊天的消息，请点「自动获取」选择要推送到哪一个")
+				return
+			}
+		}
+		if !regexp.MustCompile(`^-?\d+$|^@[A-Za-z0-9_]{4,}$`).MatchString(req.ChatID) {
+			jsonErr(w, 400, "Chat ID 应为数字（群组以 - 开头）或 @频道名")
 			return
 		}
 		u, req.Name = "telegram://"+req.Token+"/"+req.ChatID, firstNonEmpty(clean(req.Name, 40), "Telegram")

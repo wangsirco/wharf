@@ -34,8 +34,18 @@ export default function Alerts() {
   const saveRules = async () => {
     try { setRules(await put<Rules>('/alerts/rules', rules)); toast.success('告警规则已保存') } catch (e) { toast.error((e as Error).message) }
   }
+  const [chats, setChats] = useState<{ bot: string; chats: { id: number; type: string; title: string; name: string }[] } | null>(null)
+  const [finding, setFinding] = useState(false)
+  const findChats = async () => {
+    setFinding(true)
+    try {
+      const r = await post<{ bot: string; chats: { id: number; type: string; title: string; name: string }[] }>('/alerts/telegram/chats', { token: ch.token })
+      setChats(r)
+      if (r.chats.length === 1) setCh((c) => ({ ...c, chat_id: String(r.chats[0].id) }))
+    } catch (e) { toast.error((e as Error).message) } finally { setFinding(false) }
+  }
   const addChannel = async () => {
-    try { await post('/alerts/channels', { type, ...ch }); setCh({ name: '', key: '', token: '', chat_id: '' }); toast.success('已添加'); reload() } catch (e) { toast.error((e as Error).message) }
+    try { await post('/alerts/channels', { type, ...ch }); setCh({ name: '', key: '', token: '', chat_id: '' }); setChats(null); toast.success('已添加，可以点「发送测试消息」试一下'); reload() } catch (e) { toast.error((e as Error).message) }
   }
   const test = async (id?: number) => {
     try {
@@ -75,9 +85,37 @@ export default function Alerts() {
               <TabsList><TabsTrigger value="telegram">Telegram</TabsTrigger><TabsTrigger value="serverchan">Server 酱</TabsTrigger></TabsList>
             </Tabs>
             {type === 'telegram' ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Bot Token" hint="找 @BotFather 创建机器人获得"><Input type="password" autoComplete="off" value={ch.token} onChange={(e) => setCh({ ...ch, token: e.target.value.trim() })} placeholder="123456:ABC-DEF…" /></Field>
-                <Field label="Chat ID" hint="个人 ID 或群组 ID（群组以 - 开头），先给机器人发一条消息"><Input value={ch.chat_id} onChange={(e) => setCh({ ...ch, chat_id: e.target.value.trim() })} placeholder="123456789" /></Field>
+              <div className="grid gap-3">
+                <ol className="list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
+                  <li>在 Telegram 找 @BotFather，发送 /newbot 创建机器人，复制它给的 Token</li>
+                  <li>打开你的机器人，点「开始」或随便发一条消息（推送到群组：把机器人拉进群并在群里发一条）</li>
+                  <li>粘贴 Token 后点「添加」，Chat ID 会自动找到；有多个聊天时点「自动获取」选择</li>
+                </ol>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Bot Token" hint="直接粘贴即可，带不带 bot 前缀、整段 getUpdates 网址都行">
+                    <Input type="password" autoComplete="off" value={ch.token} onChange={(e) => { setCh({ ...ch, token: e.target.value }); setChats(null) }} placeholder="123456789:AAE…" />
+                  </Field>
+                  <Field label="Chat ID（可留空）" hint="留空自动获取；也可以手动填，群组以 - 开头">
+                    <div className="flex gap-2">
+                      <Input value={ch.chat_id} onChange={(e) => setCh({ ...ch, chat_id: e.target.value.trim() })} placeholder="自动" />
+                      <Button variant="outline" disabled={!ch.token.trim() || finding} onClick={findChats}>{finding ? '查找中…' : '自动获取'}</Button>
+                    </div>
+                  </Field>
+                </div>
+                {chats && (
+                  <div className="grid gap-1 rounded-lg border p-2 text-sm">
+                    <div className="px-1 text-xs text-muted-foreground">
+                      {chats.chats.length ? `@${chats.bot} 最近收到的聊天，选择推送到哪里：` : `@${chats.bot} 还没收到消息：请先在 Telegram 里给它发一条，再点「自动获取」`}
+                    </div>
+                    {chats.chats.map((c) => (
+                      <button key={c.id} type="button" onClick={() => setCh({ ...ch, chat_id: String(c.id) })}
+                        className={`flex items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-muted ${ch.chat_id === String(c.id) ? 'bg-accent' : ''}`}>
+                        <span>{c.title || c.name || '（无名称）'} <span className="text-xs text-muted-foreground">{({ private: '个人', group: '群组', supergroup: '群组', channel: '频道' } as Record<string, string>)[c.type] ?? c.type}</span></span>
+                        <span className="font-mono text-xs text-muted-foreground">{c.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <Field label="SendKey" hint="在 sct.ftqq.com 登录后获取"><Input type="password" autoComplete="off" value={ch.key} onChange={(e) => setCh({ ...ch, key: e.target.value.trim() })} placeholder="SCT…" /></Field>

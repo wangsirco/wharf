@@ -135,6 +135,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("DELETE /api/alerts/channels/{id}", a.super(a.handleAlertChannelDelete))
 	m.HandleFunc("POST /api/alerts/channels/{id}/toggle", a.super(a.handleAlertChannelToggle))
 	m.HandleFunc("POST /api/alerts/test", a.super(a.handleAlertTest))
+	m.HandleFunc("POST /api/alerts/telegram/chats", a.super(a.handleTelegramChats))
 	m.HandleFunc("GET /api/access/me", a.super(a.handleAccessMe))
 	m.HandleFunc("PUT /api/settings", a.super(a.handleSettingsUpdate))
 	m.HandleFunc("GET /api/agent/status", a.super(a.handleAgentStatus))
