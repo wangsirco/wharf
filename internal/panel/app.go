@@ -164,7 +164,10 @@ var settingDefaults = map[string]string{
 	"retention.traffic_mb":      "1024",
 	"rules.update_hours":        "72",
 	"presence.away_minutes":     "10",              // unseen this long = left the network
+	"identity.dhcp_log":         "1",               // dnsmasq logs DHCP option lists (device fingerprints)
+	"identity.probe":            "1",               // ask LAN devices about themselves (mDNS / UPnP) every 10 min
 	"ui.name":                   "Wharf",           // panel name on the login page, sidebar and browser tab
+	"ui.timezone":               "",                // IANA zone for times in alerts; "" = the router's zone
 	"ui.subtitle":               "OpenWrt 控制面板",    //
 	"update.repo":               "wangsirco/wharf", // GitHub owner/name the online update uses
 	"update.check":              "1",
@@ -187,6 +190,11 @@ func (a *App) setSetting(key, value string) error {
 	a.policyMu.Lock()
 	a.policyAt = time.Time{} // invalidate cached access policy
 	a.policyMu.Unlock()
+	if key == "ui.timezone" {
+		tzCache.Lock()
+		tzCache.loc = nil
+		tzCache.Unlock()
+	}
 	_, err := a.db.Exec(`INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
 }
@@ -246,6 +254,7 @@ func (a *App) Start() {
 	go a.proxyLoop()
 	go a.ddnsLoop()
 	go a.onePanelLoop()
+	go a.identityLoop()
 	log.Printf("panel ready")
 }
 

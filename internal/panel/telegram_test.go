@@ -46,7 +46,10 @@ func TestTelegramChannel(t *testing.T) {
 		a.handleAlertChannelAdd(rec, req)
 		return rec.Code, rec.Body.String()
 	}
-	url := func() (u string) { _ = db.QueryRow(`SELECT url FROM alert_channels ORDER BY id DESC LIMIT 1`).Scan(&u); return }
+	url := func() (u string) {
+		_ = db.QueryRow(`SELECT url FROM alert_channels ORDER BY id DESC LIMIT 1`).Scan(&u)
+		return
+	}
 
 	// chat_id as the page sends it (snake case) — was dropped before 0.18.2
 	if code, body := add(map[string]string{"type": "telegram", "token": tgTestToken, "chat_id": "123456789"}); code != 200 {

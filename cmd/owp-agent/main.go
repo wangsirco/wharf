@@ -101,6 +101,8 @@ func main() {
 	}
 
 	agent.SetProxyDir(*dataDir)
+	agent.SetIdentityDir(*dataDir)
+	go agent.RunIdentity()
 	go agent.RunProxyStats()
 	handler := agent.NewServer(agent.Config{Listen: *listen, KeyID: *keyID, Secret: *secret, AllowFrom: strings.Fields(*allow), DataDir: *dataDir})
 	// OWP_COLLECT=0 runs an API-only instance (testing) that never touches the firewall

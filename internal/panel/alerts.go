@@ -165,7 +165,8 @@ func sendTo(raw, title, body string) error {
 		if !ok || token == "" || chat == "" {
 			return errors.New("Telegram 需要 Bot Token 和 Chat ID")
 		}
-		b, _ := json.Marshal(map[string]any{"chat_id": chat, "text": title + "\n" + body, "disable_web_page_preview": true})
+		esc := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace
+		b, _ := json.Marshal(map[string]any{"chat_id": chat, "text": "<b>" + esc(title) + "</b>\n" + esc(body), "parse_mode": "HTML", "disable_web_page_preview": true})
 		resp, err := cl.Post(tgAPI+"/bot"+token+"/sendMessage", "application/json", bytes.NewReader(b))
 		if err != nil {
 			return errors.New("Telegram 不可达") // never echo the token-bearing URL
@@ -213,7 +214,7 @@ func (a *App) notify(kind, title, body string, urgent bool) {
 			if !c.Enabled {
 				continue
 			}
-			if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】"+title, body); err != nil {
+			if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】"+title, strings.TrimSpace(body+"\n\n🕒 "+a.zoneLine(time.Now()))); err != nil {
 				results = append(results, c.Name+"：失败 "+truncate(err.Error(), 120))
 			} else {
 				results = append(results, c.Name+"：已发送")
@@ -256,51 +257,163 @@ func (a *App) alertEngine() {
 
 // presenceAlerts reports devices that left or came back in one presence round (the
 // tracker's own events, so alerts and the dashboard always agree). Several devices at
-// once become one message per direction.
+// once become one message per direction. Every time is written in the panel's time zone.
 func (a *App) presenceAlerts(evs []presenceEv) {
 	if len(a.alertChannels(false)) == 0 {
 		return
 	}
 	r := a.alertRules()
-	type item struct{ name, detail string }
-	var left, back []item
+	var left, back []presenceEv
 	for _, e := range evs {
 		if !r.PresenceAll && !slices.Contains(r.PresenceWatch, e.mac) {
 			continue
 		}
-		name := a.deviceLabel(e.mac)
-		if e.ip != "" && !strings.Contains(name, e.ip) {
-			name += " " + e.ip
-		}
 		switch {
 		case e.kind == "left" && r.DeviceLeft:
-			left = append(left, item{name, "最后在线 " + time.Unix(e.ts, 0).Format("15:04")})
+			left = append(left, e)
 		case e.kind == "back" && r.DeviceBack:
-			it := item{name, ""}
-			if e.away > 0 {
-				it.detail = "离开了 " + awayText(e.away)
-			}
-			back = append(back, it)
+			back = append(back, e)
 		}
 	}
-	send := func(kind, verb string, list []item, note string) {
-		switch len(list) {
-		case 0:
-		case 1:
-			a.notify(kind, "设备"+verb+"："+list[0].name, strings.TrimPrefix(list[0].detail+note, "\n"), false)
-		default:
-			lines := make([]string, len(list))
-			for i, it := range list {
-				lines[i] = it.name
-				if it.detail != "" {
-					lines[i] += "（" + it.detail + "）"
+	away := max(r.AwayMinutes, 3)
+	if len(left) == 1 {
+		e := left[0]
+		name, lines := a.deviceLines(e.mac, e.ip)
+		lines = append(lines, "离开时间："+a.when(e.ts)+"（之后 "+strconv.Itoa(away)+" 分钟没有在网络里出现）")
+		if since := a.lastArrival(e.mac, e.ts); since > 0 {
+			lines = append(lines, "这次在家："+a.when(since)+" 起，共 "+awayText(e.ts-since))
+		}
+		a.notify("device_left", "设备离开："+name, strings.Join(lines, "\n"), false)
+	} else if len(left) > 1 {
+		var lines []string
+		for _, e := range left {
+			name, _ := a.deviceLines(e.mac, e.ip)
+			lines = append(lines, "• "+name+" "+e.ip+"，"+a.clock(e.ts)+" 离开")
+		}
+		lines = append(lines, "（之后 "+strconv.Itoa(away)+" 分钟没有在网络里出现）")
+		a.notify("device_left", fmt.Sprintf("%d 台设备离开", len(left)), strings.Join(lines, "\n"), false)
+	}
+	if len(back) == 1 {
+		e := back[0]
+		name, lines := a.deviceLines(e.mac, e.ip)
+		lines = append(lines, "回来时间："+a.when(e.ts))
+		if e.away > 0 {
+			lines = append(lines, "离开时间："+a.when(e.ts-e.away), "离开了 "+awayText(e.away))
+		}
+		a.notify("device_back", "设备回来："+name, strings.Join(lines, "\n"), false)
+	} else if len(back) > 1 {
+		var lines []string
+		for _, e := range back {
+			name, _ := a.deviceLines(e.mac, e.ip)
+			l := "• " + name + " " + e.ip + "，" + a.clock(e.ts) + " 回来"
+			if e.away > 0 {
+				l += "（" + a.clock(e.ts-e.away) + " 离开，离开了 " + awayText(e.away) + "）"
+			}
+			lines = append(lines, l)
+		}
+		a.notify("device_back", fmt.Sprintf("%d 台设备回来", len(back)), strings.Join(lines, "\n"), false)
+	}
+}
+
+// deviceLines: the display name and a few lines that describe the device.
+func (a *App) deviceLines(mac, ip string) (string, []string) {
+	var seenName, seenIP string
+	_ = a.db.QueryRow(`SELECT name, ip FROM devices_seen WHERE mac=?`, mac).Scan(&seenName, &seenIP)
+	meta, _ := a.deviceMeta(mac)
+	id := a.identifyDevice(mac, seenName, meta.Type)
+	name := firstNonEmpty(meta.Alias, displayName("", "", seenName, id), mac)
+	kind := strings.Join(slices.DeleteFunc([]string{id.Model, id.Type, id.OS}, func(s string) bool { return s == "" || s == "未知" }), " · ")
+	if kind != "" {
+		kind = "设备：" + kind
+		if id.Random {
+			kind += "（隐私 MAC）"
+		}
+	}
+	addr := "IP " + firstNonEmpty(ip, seenIP, "未知") + " · MAC " + mac
+	return name, slices.DeleteFunc([]string{kind, addr}, func(s string) bool { return s == "" })
+}
+
+// lastArrival: when the device last came back before ts (0 = not known).
+func (a *App) lastArrival(mac string, ts int64) int64 {
+	var t int64
+	_ = a.db.QueryRow(`SELECT COALESCE(MAX(ts),0) FROM device_events WHERE mac=? AND kind='back' AND ts < ?`, mac, ts).Scan(&t)
+	return t
+}
+
+// ---- time zone ----
+
+var tzCache struct {
+	sync.Mutex
+	at  time.Time
+	loc *time.Location
+}
+
+// tz is the panel's time zone: the setting, else the router's own zone, else Local.
+func (a *App) tz() *time.Location {
+	tzCache.Lock()
+	defer tzCache.Unlock()
+	if tzCache.loc != nil && time.Since(tzCache.at) < 10*time.Minute {
+		return tzCache.loc
+	}
+	loc := time.Local
+	name := a.setting("ui.timezone")
+	if name == "" && a.agent != nil {
+		if sys, err := a.agent.UciConfig("system"); err == nil {
+			for _, s := range sys {
+				if optStr(s, ".type") == "system" || optStr(s, "zonename") != "" {
+					name = firstNonEmpty(optStr(s, "zonename"), name)
 				}
 			}
-			a.notify(kind, fmt.Sprintf("%d 台设备%s", len(list), verb), strings.Join(lines, "\n")+note, false)
 		}
 	}
-	send("device_left", "离开", left, fmt.Sprintf("\n超过 %d 分钟没有在网络里出现", max(r.AwayMinutes, 3)))
-	send("device_back", "回来", back, "")
+	if l, err := time.LoadLocation(strings.ReplaceAll(name, " ", "_")); err == nil && name != "" {
+		loc = l
+	}
+	tzCache.loc, tzCache.at = loc, time.Now()
+	return loc
+}
+
+var zoneNames = map[string]string{
+	"Pacific/Auckland": "新西兰", "Asia/Shanghai": "北京时间", "Asia/Hong_Kong": "香港", "Asia/Taipei": "台北", "Asia/Tokyo": "东京",
+	"Asia/Singapore": "新加坡", "Australia/Sydney": "悉尼", "Australia/Melbourne": "墨尔本", "Europe/London": "伦敦",
+	"America/Los_Angeles": "洛杉矶", "America/New_York": "纽约", "America/Vancouver": "温哥华", "America/Toronto": "多伦多", "UTC": "UTC",
+}
+
+// when: "11月1日 08:42"; clock: "08:42" (both in the panel's zone).
+func (a *App) when(ts int64) string {
+	t := time.Unix(ts, 0).In(a.tz())
+	now := time.Now().In(a.tz())
+	if t.Year() != now.Year() {
+		return t.Format("2006年1月2日 15:04")
+	}
+	return t.Format("1月2日 15:04")
+}
+
+func (a *App) clock(ts int64) string { return time.Unix(ts, 0).In(a.tz()).Format("15:04") }
+
+// zoneLine: "2026-11-01 08:42 NZDT（新西兰 · UTC+13）", closing every alert.
+func (a *App) zoneLine(t time.Time) string {
+	loc := a.tz()
+	t = t.In(loc)
+	abbr, off := t.Zone()
+	sign := "+"
+	if off < 0 {
+		sign, off = "-", -off
+	}
+	utc := "UTC" + sign + strconv.Itoa(off/3600)
+	if m := off % 3600 / 60; m != 0 {
+		utc += fmt.Sprintf(":%02d", m)
+	}
+	label := firstNonEmpty(zoneNames[loc.String()], loc.String())
+	if label == "Local" {
+		label = ""
+	} else {
+		label += " · "
+	}
+	if abbr == "" || abbr[0] == '+' || abbr[0] == '-' {
+		return t.Format("2006-01-02 15:04") + "（" + label + utc + "）"
+	}
+	return t.Format("2006-01-02 15:04") + " " + abbr + "（" + label + utc + "）"
 }
 
 func (a *App) deviceLabel(mac string) string {
@@ -785,7 +898,7 @@ func (a *App) handleAlertTest(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		res := "已发送"
-		if err := sendTo(c.URL, "【OWP】测试消息", "如果你收到了这条消息，说明告警渠道配置正确。"); err != nil {
+		if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】测试消息", "如果你收到了这条消息，说明告警渠道配置正确。\n\n🕒 "+a.zoneLine(time.Now())); err != nil {
 			res = "失败：" + err.Error()
 		}
 		out = append(out, map[string]string{"name": c.Name, "result": res})

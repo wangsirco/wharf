@@ -24,12 +24,16 @@ type devIdent struct {
 	Type   string `json:"type"`
 	OS     string `json:"os"`
 	Vendor string `json:"vendor"`
-	By     string `json:"type_by"` // manual | hostname | vendor | dns | random | ""
+	By     string `json:"type_by"` // manual | hostname | mdns | dhcp | vendor | dns | random | ""
 	Random bool   `json:"random_mac"`
 	// virtual machines: VMTag is the platform label shown next to the name
 	// ("PVE 虚拟机 #105"); GuestName comes from the hypervisor's own config.
 	VMTag     string `json:"vm_tag,omitempty"`
 	GuestName string `json:"guest_name,omitempty"`
+	// what the device says about itself on the LAN (fingerprint.go): its model
+	// ("iPhone 16 Pro", "Google TV Streamer") and the name it uses there
+	Model   string `json:"model,omitempty"`
+	NetName string `json:"net_name,omitempty"`
 }
 
 type hostRule struct {
@@ -100,7 +104,11 @@ func (a *App) refreshDNSHints() {
 		CASE WHEN domain LIKE '%apple.com' OR domain LIKE '%icloud.com' OR domain LIKE '%mzstatic.com' OR domain LIKE '%apple-dns.net' THEN 'apple'
 		     WHEN domain LIKE '%android%' OR domain LIKE '%googleapis.com' OR domain LIKE '%gstatic.com' OR domain LIKE '%gvt1.com' THEN 'google'
 		     WHEN domain LIKE '%windowsupdate.com' OR domain LIKE '%msftconnecttest.com' OR domain LIKE '%msedge.net' OR domain LIKE '%microsoft.com' THEN 'windows'
-		     WHEN domain LIKE '%xiaomi.com' OR domain LIKE '%mi.com' OR domain LIKE '%miui.com' THEN 'xiaomi'
+		     WHEN domain LIKE '%xiaomi.com' OR domain LIKE '%mi.com' OR domain LIKE '%miui.com' OR domain LIKE '%xiaomi.net' THEN 'xiaomi'
+		     WHEN domain LIKE '%hicloud.com' OR domain LIKE '%huawei.com' OR domain LIKE '%dbankcloud.c%' OR domain LIKE '%honor.com' OR domain LIKE '%hihonor.com' THEN 'huawei'
+		     WHEN domain LIKE '%samsung.com' OR domain LIKE '%samsungcloud.com' OR domain LIKE '%samsungapps.com' OR domain LIKE '%samsungosp.com' THEN 'samsung'
+		     WHEN domain LIKE '%heytap%' OR domain LIKE '%oppo.com' OR domain LIKE '%coloros.com' OR domain LIKE '%oppomobile.com' OR domain LIKE '%oneplus%' THEN 'oppo'
+		     WHEN domain LIKE '%vivo.com%' OR domain LIKE '%vivoglobal.com' OR domain LIKE '%bbktel.com' THEN 'vivo'
 		     ELSE '' END AS k, SUM(count)
 		FROM dns_hour WHERE hour >= ? GROUP BY mac, k`, time.Now().Unix()-3*86400)
 	if err == nil {
@@ -181,6 +189,19 @@ func (a *App) identifyDevice(mac, hostname, manualType string) (id devIdent) {
 			break
 		}
 	}
+	if fp, ok := fpOf(mac); ok {
+		c := classifyFP(fp, id.Random)
+		if id.Type == "" && c.typ != "" {
+			id.Type, id.By = c.typ, c.by
+		}
+		if id.OS == "" {
+			id.OS = c.os
+		}
+		id.Model, id.NetName = c.model, c.name
+		if id.Vendor == "" && c.maker != "" {
+			id.Vendor = c.maker
+		}
+	}
 	if id.Type == "" || id.OS == "" {
 		for _, r := range vendorRules {
 			if v != "" && vendorRe[r.match].MatchString(v) {
@@ -221,12 +242,28 @@ func (a *App) identifyDevice(mac, hostname, manualType string) (id devIdent) {
 			if id.Type == "" {
 				id.Type, id.By = "电脑", "dns"
 			}
-		case share("google") > 0.3 && share("apple") < 0.05:
+		case share("google") > 0.3 && share("apple") < 0.05,
+			share("huawei")+share("samsung")+share("oppo")+share("vivo")+share("xiaomi") > 0.1 && share("apple") < 0.05:
 			if id.OS == "" {
 				id.OS = "Android"
 			}
 			if id.Type == "" && id.Random {
 				id.Type, id.By = "手机", "dns"
+			}
+		}
+		// a randomised MAC has no vendor: the phone maker's own services tell it
+		if id.Vendor == "" && share("apple") < 0.05 {
+			best, bestN := "", 0.08
+			for k, brand := range map[string]string{"huawei": "华为", "samsung": "三星", "oppo": "OPPO / 一加", "vivo": "vivo", "xiaomi": "小米"} {
+				if share(k) > bestN {
+					best, bestN = brand, share(k)
+				}
+			}
+			if best != "" {
+				id.Vendor = best
+				if best == "华为" && id.OS == "Android" {
+					id.OS = "HarmonyOS / Android"
+				}
 			}
 		}
 	}
@@ -370,7 +407,7 @@ func vmPlatform(vendor string) string {
 // displayName picks the best name: alias, DHCP reservation, DHCP hostname, the
 // hypervisor's guest name, then a description built from the vendor/type.
 func displayName(alias, static, hostname string, id devIdent) string {
-	return firstNonEmpty(alias, static, hostname, id.GuestName, fallbackName(id))
+	return firstNonEmpty(alias, static, hostname, id.GuestName, id.NetName, fallbackName(id))
 }
 
 // fallbackName names a device that has no alias or DHCP hostname.
@@ -378,6 +415,22 @@ func fallbackName(id devIdent) string {
 	switch {
 	case id.GuestName != "":
 		return id.GuestName
+	case id.Model != "" && id.Vendor != "" && !strings.Contains(id.Model, id.Vendor):
+		return id.Vendor + " " + id.Model
+	case id.Model != "":
+		return id.Model
+	case id.Random && strings.HasPrefix(id.OS, "iOS"):
+		return "iPhone / iPad（隐私 MAC）"
+	case id.Random && id.OS == "iPadOS":
+		return "iPad（隐私 MAC）"
+	case id.Random && id.OS == "macOS":
+		return "Mac（隐私 MAC）"
+	case id.Random && id.Vendor != "" && id.Type != "未知":
+		return id.Vendor + " " + id.Type + "（隐私 MAC）"
+	case id.Random && strings.HasPrefix(id.OS, "Android"):
+		return "Android " + id.Type + "（隐私 MAC）"
+	case id.Random && id.OS == "Windows":
+		return "Windows 电脑（隐私 MAC）"
 	case id.VMTag != "":
 		return "未命名虚拟机"
 	case id.Vendor != "" && strings.Contains(id.Vendor, id.Type):

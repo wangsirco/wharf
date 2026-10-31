@@ -32,7 +32,7 @@ export interface Device {
   neigh_state: string; online: boolean; last_seen?: number; static: boolean; static_id?: string
   presence?: 'home' | 'away'; away_since?: number
   owner_id?: number; owner_name?: string; editable: boolean
-  name: string; alias: string; note: string; type: string; os: string; vendor: string; type_by: string; random_mac: boolean; vm_tag?: string; guest_name?: string
+  name: string; alias: string; note: string; type: string; os: string; vendor: string; type_by: string; random_mac: boolean; vm_tag?: string; guest_name?: string; model?: string; net_name?: string
   first_seen: number; is_new: boolean; controlled: boolean; blocked: boolean; blocked_by: string
 }
 

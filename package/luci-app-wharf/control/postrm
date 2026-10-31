@@ -40,7 +40,7 @@ iptables -w -t nat -D PREROUTING -j owp_dns 2>/dev/null; iptables -w -t nat -F o
 for s in $(ipset list -n 2>/dev/null | grep -E "^owp_p[bw]_|^owp_captive$"); do ipset destroy "$s" 2>/dev/null; done
 # dnsmasq query log enabled by the agent
 for s in $(uci -q show dhcp | sed -n "s/^dhcp\.\([^.]*\)\.logfacility='\/var\/log\/owp-dns.log'$/\1/p"); do
-	uci -q delete dhcp.$s.logfacility; uci -q delete dhcp.$s.logqueries
+	uci -q delete dhcp.$s.logfacility; uci -q delete dhcp.$s.logqueries; uci -q delete dhcp.$s.logdhcp
 	uci commit dhcp && /etc/init.d/dnsmasq restart >/dev/null 2>&1
 done
 rm -f /var/log/owp-dns.log

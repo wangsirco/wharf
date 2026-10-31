@@ -61,7 +61,8 @@ export default function DevicePage() {
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 text-sm text-muted-foreground">
             <span className="font-mono">{d?.ip}</span><span className="font-mono">{mac}</span>
-            {d && <span>{d.type}{d.os ? ` · ${d.os}` : ''}{d.vendor ? ` · ${d.vendor}` : d.random_mac ? ' · 隐私 MAC' : ''}</span>}
+            {d && <span>{d.type}{d.model ? ` · ${d.model}` : ''}{d.os ? ` · ${d.os}` : ''}{d.vendor ? ` · ${d.vendor}` : ''}{d.random_mac ? ' · 隐私 MAC' : ''}</span>}
+            {d?.net_name && d.net_name !== devName(d) && <span className="text-xs">网络名称 {d.net_name}</span>}
             {d?.type_by && <span className="text-xs">（{TYPE_BY[d.type_by] ?? d.type_by}识别）</span>}
             {d?.first_seen ? <span className="text-xs">首次出现 {datetime(d.first_seen)}</span> : null}
           </div>

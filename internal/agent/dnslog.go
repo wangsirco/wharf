@@ -35,6 +35,8 @@ type DNSLog struct {
 	byClient map[string]map[string]dnsEntry // client ip -> resolved ip -> name
 	global   map[string]dnsEntry            // resolved ip -> name (any client)
 
+	dhcp map[string]*dhcpTx // log-dhcp transactions by serial (identity.go)
+
 	onQuery   func(client, name string, blocked bool)
 	OnResolve func(name, ip string) // every A/AAAA answer (used by device policies)
 }
@@ -99,8 +101,12 @@ func (d *DNSLog) Lookup(client, ip string) string {
 }
 
 func (d *DNSLog) handle(line string) {
-	_, rest, ok := strings.Cut(line, "]: ")
+	head, rest, ok := strings.Cut(line, "]: ")
 	if !ok {
+		return
+	}
+	if strings.Contains(head, "dnsmasq-dhcp") {
+		d.handleDHCP(rest)
 		return
 	}
 	f := strings.Fields(rest)
@@ -232,6 +238,7 @@ func (d *DNSLog) Run() {
 		}
 		if time.Since(lastGC) > time.Minute {
 			d.gc()
+			d.gcDHCP()
 			lastGC = time.Now()
 		}
 	}

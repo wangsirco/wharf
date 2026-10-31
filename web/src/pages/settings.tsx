@@ -68,6 +68,24 @@ export default function SettingsPage() {
           <div className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="名称" hint="最多 24 个字符"><Input maxLength={24} value={draft['ui.name'] ?? ''} placeholder="Wharf" onChange={(e) => setDraft({ ...draft, 'ui.name': e.target.value })} /></Field>
             <Field label="副标题" hint="最多 40 个字符，可留空"><Input maxLength={40} value={draft['ui.subtitle'] ?? ''} placeholder="OpenWrt 控制面板" onChange={(e) => setDraft({ ...draft, 'ui.subtitle': e.target.value })} /></Field>
+            <Field label="时区" hint="告警消息里的时间按这个时区写，并注明时区。留空 = 跟随路由器的系统时区">
+              <Input list="owp-tz" value={draft['ui.timezone'] ?? ''} placeholder="跟随路由器（例如 Pacific/Auckland）" onChange={(e) => setDraft({ ...draft, 'ui.timezone': e.target.value.trim() })} />
+              <datalist id="owp-tz">
+                {['Pacific/Auckland', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Singapore', 'Australia/Sydney', 'Australia/Melbourne', 'Europe/London', 'America/Los_Angeles', 'America/New_York', 'America/Vancouver', 'America/Toronto', 'UTC'].map((z) => <option key={z} value={z} />)}
+              </datalist>
+            </Field>
+          </div>
+        </Section>
+        <Section title="设备识别" desc="用于判断隐私 MAC、没有主机名的设备是什么。两项都只读取信息，不改变设备。">
+          <div className="divide-y">
+            <label className="flex items-center justify-between gap-4 px-4 py-3">
+              <span><span className="text-sm">DHCP 指纹</span><span className="block text-xs text-muted-foreground">让 dnsmasq 记录设备获取地址时请求的参数（iPhone、安卓、Windows、电视各不相同）。设备下次续租或重连 Wi-Fi 时生效</span></span>
+              <Switch checked={draft['identity.dhcp_log'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.dhcp_log': c ? '1' : '0' })} />
+            </label>
+            <label className="flex items-center justify-between gap-4 px-4 py-3">
+              <span><span className="text-sm">询问设备名称和型号</span><span className="block text-xs text-muted-foreground">每 10 分钟用 Bonjour（mDNS）和 UPnP 问一次在线设备：苹果设备、电视、打印机、游戏机等会报出自己的名称和型号</span></span>
+              <Switch checked={draft['identity.probe'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.probe': c ? '1' : '0' })} />
+            </label>
           </div>
         </Section>
         <Section title="敏感操作二次确认" desc="开启后，普通管理员执行该操作需要超级管理员批准；超级管理员本人不受限制。">

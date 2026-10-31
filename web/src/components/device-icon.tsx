@@ -16,4 +16,4 @@ export function DeviceIcon({ type, online, className }: { type?: string; online?
   )
 }
 
-export const TYPE_BY: Record<string, string> = { manual: '手动设置', hostname: '按主机名', vendor: '按 MAC 厂商', dns: '按访问的平台', random: '隐私 MAC（多为手机 / 平板）' }
+export const TYPE_BY: Record<string, string> = { manual: '手动设置', hostname: '按主机名', mdns: '按设备自报（Bonjour / mDNS）', upnp: '按设备自报（UPnP）', dhcp: '按 DHCP 指纹', vendor: '按 MAC 厂商', dns: '按访问的平台', random: '隐私 MAC（多为手机 / 平板）', pve: '按 PVE' }

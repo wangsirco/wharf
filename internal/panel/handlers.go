@@ -40,6 +40,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/actions/{key}", a.auth("", a.handleAction))
 	m.HandleFunc("GET /api/system", a.auth("dashboard.view", a.handleSystem))
 	m.HandleFunc("GET /api/devices", a.auth("devices.view", a.handleDevices))
+	m.HandleFunc("GET /api/devices/fingerprints", a.super(a.handleFingerprints))
 	m.HandleFunc("GET /api/forwards", a.auth("forwards.view", a.handleForwards))
 	m.HandleFunc("GET /api/forwards/targets", a.auth("forwards.manage", a.handleForwardTargets))
 	m.HandleFunc("GET /api/geo/regions", a.auth("", a.handleRegions))
@@ -555,6 +556,18 @@ func validSetting(key, value string) error {
 		max := map[string]int{"ui.name": 24, "ui.subtitle": 40}[key]
 		if (key == "ui.name" && v == "") || len([]rune(v)) > max || v != value || !brandRe.MatchString(v) {
 			return fmt.Errorf("名称需为 1-%d 个字符，不能包含 < > \" ' &", max)
+		}
+		return nil
+	case "ui.timezone":
+		if value != "" {
+			if _, err := time.LoadLocation(value); err != nil {
+				return fmt.Errorf("时区应为 IANA 名称，例如 Pacific/Auckland、Asia/Shanghai")
+			}
+		}
+		return nil
+	case "identity.dhcp_log", "identity.probe":
+		if value != "0" && value != "1" {
+			return fmt.Errorf("只能是 0 或 1")
 		}
 		return nil
 	case "presence.away_minutes":

@@ -92,6 +92,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, GetSystem())
 	case r.Method == "GET" && r.URL.Path == "/v1/devices":
 		writeJSON(w, 200, GetDevices())
+	case r.Method == "GET" && r.URL.Path == "/v1/identity":
+		writeJSON(w, 200, Fingerprints())
+	case r.Method == "POST" && r.URL.Path == "/v1/identity/probe":
+		go ProbeNetwork()
+		writeJSON(w, 202, map[string]bool{"ok": true})
+	case r.Method == "POST" && r.URL.Path == "/v1/identity/dhcplog":
+		var req struct {
+			On bool `json:"on"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req)
+		if err := SetDHCPLogging(req.On); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
 	case r.Method == "GET" && r.URL.Path == "/v1/uci":
 		cfg := r.URL.Query().Get("config")
 		if cfg == "" || strings.ContainsAny(cfg, "/. ") {

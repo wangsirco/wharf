@@ -30,7 +30,8 @@ func TestPresenceAlerts(t *testing.T) {
 		{ts: 1000, mac: "aa:00:00:00:00:02", ip: "192.168.1.6", kind: "left"}, // not watched
 	}
 	a.presenceAlerts(evs)
-	if len(sent) != 1 || !strings.Contains(sent[0], "设备离开：aa:00:00:00:00:01 192.168.1.5|最后在线") {
+	if len(sent) != 1 || !strings.Contains(sent[0], "设备离开：") || !strings.Contains(sent[0], "IP 192.168.1.5 · MAC aa:00:00:00:00:01") ||
+		!strings.Contains(sent[0], "离开时间：") || !strings.Contains(sent[0], "🕒 ") {
 		t.Fatalf("watched only: %q", sent)
 	}
 
@@ -40,7 +41,7 @@ func TestPresenceAlerts(t *testing.T) {
 	a.presenceAlerts(append(evs,
 		presenceEv{ts: 5000, mac: "aa:00:00:00:00:03", ip: "192.168.1.7", kind: "back", away: 3600},
 		presenceEv{ts: 5000, mac: "aa:00:00:00:00:04", ip: "192.168.1.8", kind: "back"}))
-	if len(sent) != 1 || !strings.Contains(sent[0], "2 台设备回来|") || !strings.Contains(sent[0], "（离开了 1 小时）") {
+	if len(sent) != 1 || !strings.Contains(sent[0], "2 台设备回来|") || !strings.Contains(sent[0], "离开了 1 小时") || strings.Count(sent[0], "• ") != 2 {
 		t.Fatalf("grouped: %q", sent)
 	}
 }
