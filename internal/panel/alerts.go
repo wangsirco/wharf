@@ -134,6 +134,23 @@ func maskURL(u string) string {
 
 var sendAlert = sendTo // replaced in tests
 
+// Alert texts may mark **bold** parts; Telegram gets HTML, Server 酱 Markdown.
+var boldRe = regexp.MustCompile(`\*\*(.+?)\*\*`)
+
+func plainBold(s string) string { return boldRe.ReplaceAllString(s, "$1") }
+
+func tgHTML(s string) string {
+	s = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+	return boldRe.ReplaceAllString(s, "<b>$1</b>")
+}
+
+// kindEmoji leads each alert's title so it can be told apart at a glance.
+var kindEmoji = map[string]string{
+	"new_device": "🆕", "wan_down": "🔴", "wan_up": "🟢", "line_down": "🟠", "line_up": "🟢", "traffic_spike": "📈",
+	"panel_denied": "🛡️", "approval": "📝", "monitor": "📡", "ddns": "🌐", "proxy": "🔑", "proxy_cert": "🔒",
+	"device_left": "🚪", "device_back": "🏠", "test": "✅",
+}
+
 // sendTo delivers one message to one channel URL:
 //
 //	serverchan://<SendKey>          Server 酱
@@ -146,7 +163,8 @@ func sendTo(raw, title, body string) error {
 	cl := &http.Client{Timeout: 15 * time.Second}
 	switch scheme {
 	case "serverchan":
-		resp, err := cl.PostForm("https://sctapi.ftqq.com/"+url.PathEscape(rest)+".send", url.Values{"title": {title}, "desp": {body}})
+		// desp is Markdown: keep **bold**, and make every line break a real one
+		resp, err := cl.PostForm("https://sctapi.ftqq.com/"+url.PathEscape(rest)+".send", url.Values{"title": {plainBold(title)}, "desp": {strings.ReplaceAll(body, "\n", "  \n")}})
 		if err != nil {
 			return err
 		}
@@ -165,8 +183,7 @@ func sendTo(raw, title, body string) error {
 		if !ok || token == "" || chat == "" {
 			return errors.New("Telegram 需要 Bot Token 和 Chat ID")
 		}
-		esc := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace
-		b, _ := json.Marshal(map[string]any{"chat_id": chat, "text": "<b>" + esc(title) + "</b>\n" + esc(body), "parse_mode": "HTML", "disable_web_page_preview": true})
+		b, _ := json.Marshal(map[string]any{"chat_id": chat, "text": "<b>" + tgHTML(plainBold(title)) + "</b>\n\n" + tgHTML(body), "parse_mode": "HTML", "disable_web_page_preview": true})
 		resp, err := cl.Post(tgAPI+"/bot"+token+"/sendMessage", "application/json", bytes.NewReader(b))
 		if err != nil {
 			return errors.New("Telegram 不可达") // never echo the token-bearing URL
@@ -214,7 +231,11 @@ func (a *App) notify(kind, title, body string, urgent bool) {
 			if !c.Enabled {
 				continue
 			}
-			if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】"+title, strings.TrimSpace(body+"\n\n🕒 "+a.zoneLine(time.Now()))); err != nil {
+			head := title
+			if e := kindEmoji[kind]; e != "" {
+				head = e + " " + title
+			}
+			if err := sendAlert(c.URL, head+" · "+a.setting("ui.name"), strings.TrimSpace(body+"\n\n🕒 "+a.zoneLine(time.Now()))); err != nil {
 				results = append(results, c.Name+"：失败 "+truncate(err.Error(), 120))
 			} else {
 				results = append(results, c.Name+"：已发送")
@@ -255,82 +276,142 @@ func (a *App) alertEngine() {
 	}
 }
 
-// presenceAlerts reports devices that left or came back in one presence round (the
-// tracker's own events, so alerts and the dashboard always agree). Several devices at
-// once become one message per direction. Every time is written in the panel's time zone.
+// Presence alerts wait for things to settle: people come home a few minutes apart, so
+// events are collected until 3 minutes pass without a new one (10 at most) and then sent
+// as one message per direction.
+var presenceBuf struct {
+	sync.Mutex
+	evs         []presenceEv
+	first, last time.Time
+	running     bool
+}
+
+const (
+	presenceQuiet = 3 * time.Minute
+	presenceMax   = 10 * time.Minute
+)
+
+// presenceAlerts queues the presence tracker's events (its own events, so alerts and the
+// dashboard always agree).
 func (a *App) presenceAlerts(evs []presenceEv) {
+	presenceBuf.Lock()
+	defer presenceBuf.Unlock()
+	now := time.Now()
+	if len(presenceBuf.evs) == 0 {
+		presenceBuf.first = now
+	}
+	presenceBuf.evs = append(presenceBuf.evs, evs...)
+	presenceBuf.last = now
+	if !presenceBuf.running {
+		presenceBuf.running = true
+		go func() {
+			for {
+				time.Sleep(20 * time.Second)
+				presenceBuf.Lock()
+				if time.Since(presenceBuf.last) < presenceQuiet && time.Since(presenceBuf.first) < presenceMax {
+					presenceBuf.Unlock()
+					continue
+				}
+				batch := presenceBuf.evs
+				presenceBuf.evs, presenceBuf.running = nil, false
+				presenceBuf.Unlock()
+				a.sendPresence(batch)
+				return
+			}
+		}()
+	}
+}
+
+type devCard struct {
+	name, emoji, kind, ip, mac string
+}
+
+// deviceCard describes a device for an alert.
+func (a *App) deviceCard(mac, ip string) devCard {
+	var seenName, seenIP string
+	_ = a.db.QueryRow(`SELECT name, ip FROM devices_seen WHERE mac=?`, mac).Scan(&seenName, &seenIP)
+	meta, _ := a.deviceMeta(mac)
+	id := a.identifyDevice(mac, seenName, meta.Type)
+	c := devCard{name: firstNonEmpty(meta.Alias, displayName("", "", seenName, id), mac), emoji: typeEmoji[id.Type], ip: firstNonEmpty(ip, seenIP), mac: mac}
+	if c.emoji == "" {
+		c.emoji = "❔"
+	}
+	c.kind = strings.Join(slices.DeleteFunc([]string{id.Model, id.Type, id.OS}, func(s string) bool { return s == "" || s == "未知" }), " · ")
+	if id.Random {
+		c.kind = strings.TrimPrefix(c.kind+" · 隐私 MAC", " · ")
+	}
+	return c
+}
+
+var typeEmoji = map[string]string{
+	"手机": "📱", "平板": "📱", "电脑": "💻", "手表": "⌚", "电视/投屏": "📺", "智能音箱": "🔊", "摄像头": "📷", "智能家电": "🏠",
+	"路由/AP": "📶", "NAS/服务器": "🗄️", "虚拟机": "🖥️", "游戏机": "🎮", "打印机": "🖨️", "物联网": "🔌",
+}
+
+// sendPresence: one message per direction; each device a block with its name in bold.
+func (a *App) sendPresence(evs []presenceEv) {
 	if len(a.alertChannels(false)) == 0 {
 		return
 	}
 	r := a.alertRules()
 	var left, back []presenceEv
-	for _, e := range evs {
-		if !r.PresenceAll && !slices.Contains(r.PresenceWatch, e.mac) {
+	seen := map[string]bool{}
+	for i := len(evs) - 1; i >= 0; i-- { // newest event per device and direction
+		e := evs[i]
+		if seen[e.mac+e.kind] || (!r.PresenceAll && !slices.Contains(r.PresenceWatch, e.mac)) {
 			continue
 		}
+		seen[e.mac+e.kind] = true
 		switch {
 		case e.kind == "left" && r.DeviceLeft:
-			left = append(left, e)
+			left = append([]presenceEv{e}, left...)
 		case e.kind == "back" && r.DeviceBack:
-			back = append(back, e)
+			back = append([]presenceEv{e}, back...)
 		}
 	}
 	away := max(r.AwayMinutes, 3)
-	if len(left) == 1 {
-		e := left[0]
-		name, lines := a.deviceLines(e.mac, e.ip)
-		lines = append(lines, "离开时间："+a.when(e.ts)+"（之后 "+strconv.Itoa(away)+" 分钟没有在网络里出现）")
-		if since := a.lastArrival(e.mac, e.ts); since > 0 {
-			lines = append(lines, "这次在家："+a.when(since)+" 起，共 "+awayText(e.ts-since))
+	block := func(e presenceEv, full bool) string {
+		c := a.deviceCard(e.mac, e.ip)
+		var l []string
+		l = append(l, c.emoji+" **"+c.name+"**")
+		if c.kind != "" {
+			l = append(l, "🏷 "+c.kind)
 		}
-		a.notify("device_left", "设备离开："+name, strings.Join(lines, "\n"), false)
-	} else if len(left) > 1 {
-		var lines []string
-		for _, e := range left {
-			name, _ := a.deviceLines(e.mac, e.ip)
-			lines = append(lines, "• "+name+" "+e.ip+"，"+a.clock(e.ts)+" 离开")
+		if full {
+			l = append(l, "🌐 "+firstNonEmpty(c.ip, "IP 未知")+" · "+c.mac)
+		} else if c.ip != "" {
+			l[len(l)-1] += " · " + c.ip
 		}
-		lines = append(lines, "（之后 "+strconv.Itoa(away)+" 分钟没有在网络里出现）")
-		a.notify("device_left", fmt.Sprintf("%d 台设备离开", len(left)), strings.Join(lines, "\n"), false)
-	}
-	if len(back) == 1 {
-		e := back[0]
-		name, lines := a.deviceLines(e.mac, e.ip)
-		lines = append(lines, "回来时间："+a.when(e.ts))
-		if e.away > 0 {
-			lines = append(lines, "离开时间："+a.when(e.ts-e.away), "离开了 "+awayText(e.away))
-		}
-		a.notify("device_back", "设备回来："+name, strings.Join(lines, "\n"), false)
-	} else if len(back) > 1 {
-		var lines []string
-		for _, e := range back {
-			name, _ := a.deviceLines(e.mac, e.ip)
-			l := "• " + name + " " + e.ip + "，" + a.clock(e.ts) + " 回来"
+		if e.kind == "back" {
+			t := "🕐 " + a.when(e.ts) + " 回来"
 			if e.away > 0 {
-				l += "（" + a.clock(e.ts-e.away) + " 离开，离开了 " + awayText(e.away) + "）"
+				t += "\n🚶 " + a.when(e.ts-e.away) + " 离开，离开了 " + awayText(e.away)
 			}
-			lines = append(lines, l)
+			l = append(l, t)
+		} else {
+			l = append(l, "🕐 "+a.when(e.ts)+" 离开（之后 "+strconv.Itoa(away)+" 分钟没有出现）")
+			if since := a.lastArrival(e.mac, e.ts); since > 0 {
+				l = append(l, "🏠 这次在家 "+awayText(e.ts-since)+"（"+a.when(since)+" 回来）")
+			}
 		}
-		a.notify("device_back", fmt.Sprintf("%d 台设备回来", len(back)), strings.Join(lines, "\n"), false)
+		return strings.Join(l, "\n")
 	}
-}
-
-// deviceLines: the display name and a few lines that describe the device.
-func (a *App) deviceLines(mac, ip string) (string, []string) {
-	var seenName, seenIP string
-	_ = a.db.QueryRow(`SELECT name, ip FROM devices_seen WHERE mac=?`, mac).Scan(&seenName, &seenIP)
-	meta, _ := a.deviceMeta(mac)
-	id := a.identifyDevice(mac, seenName, meta.Type)
-	name := firstNonEmpty(meta.Alias, displayName("", "", seenName, id), mac)
-	kind := strings.Join(slices.DeleteFunc([]string{id.Model, id.Type, id.OS}, func(s string) bool { return s == "" || s == "未知" }), " · ")
-	if kind != "" {
-		kind = "设备：" + kind
-		if id.Random {
-			kind += "（隐私 MAC）"
+	send := func(kind, verb string, list []presenceEv) {
+		switch len(list) {
+		case 0:
+		case 1:
+			name := a.deviceCard(list[0].mac, list[0].ip).name
+			a.notify(kind, name+" "+verb+"了", block(list[0], true), false)
+		default:
+			parts := make([]string, len(list))
+			for i, e := range list {
+				parts[i] = block(e, false)
+			}
+			a.notify(kind, fmt.Sprintf("%d 台设备%s", len(list), verb), strings.Join(parts, "\n\n"), false)
 		}
 	}
-	addr := "IP " + firstNonEmpty(ip, seenIP, "未知") + " · MAC " + mac
-	return name, slices.DeleteFunc([]string{kind, addr}, func(s string) bool { return s == "" })
+	send("device_left", "离开", left)
+	send("device_back", "回来", back)
 }
 
 // lastArrival: when the device last came back before ts (0 = not known).
@@ -898,7 +979,7 @@ func (a *App) handleAlertTest(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		res := "已发送"
-		if err := sendAlert(c.URL, "【"+a.setting("ui.name")+"】测试消息", "如果你收到了这条消息，说明告警渠道配置正确。\n\n🕒 "+a.zoneLine(time.Now())); err != nil {
+		if err := sendAlert(c.URL, "✅ 测试消息 · "+a.setting("ui.name"), "如果你收到了这条消息，说明告警渠道 **"+c.Name+"** 配置正确。\n\n🕒 "+a.zoneLine(time.Now())); err != nil {
 			res = "失败：" + err.Error()
 		}
 		out = append(out, map[string]string{"name": c.Name, "result": res})

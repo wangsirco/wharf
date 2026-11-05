@@ -97,6 +97,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && r.URL.Path == "/v1/identity/probe":
 		go ProbeNetwork()
 		writeJSON(w, 202, map[string]bool{"ok": true})
+	case r.Method == "POST" && r.URL.Path == "/v1/panel/wan":
+		var req struct {
+			On bool `json:"on"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req)
+		if err := SetPanelWAN(req.On); err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
 	case r.Method == "POST" && r.URL.Path == "/v1/identity/dhcplog":
 		var req struct {
 			On bool `json:"on"`

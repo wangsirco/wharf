@@ -407,14 +407,19 @@ All active controls are listed together on the *设备管控* page.
   - every rule has its own switch
 - **Quiet hours:** urgent alerts such as WAN down are still sent.
 - **Log:** where every alert went and whether it succeeded.
-- Alert titles start with your panel name, for example "[Home] Monitor down: …"; Telegram shows them in bold.
+- **Layout:** titles start with an icon for the kind of alert (🏠 back, 🚪 left, 🆕 new device, 🔴 down, 🟢 recovered, 📈 traffic …) and end with the panel name, e.g. "🏠 Alex 的 iPhone 回来了 · Home"; the body gives each device a block: its name in bold, then its type (🏷), IP and MAC (🌐) and times (🕐). Telegram shows bold text, ServerChan renders Markdown.
+- **Devices arriving together, one message:** left / came back alerts wait until 3 minutes pass without another arrival or departure (10 at most), so family members coming home a few minutes apart give one "3 台设备回来".
 - **Times and time zone:** every message ends with its time and zone, for example "🕒 2026-11-01 08:42 NZDT（新西兰 · UTC+13）". A departure gives when the device left and how long it had been home; a return gives the return and leave times and how long it was away, with the device's model, system, IP and MAC. The zone is set under *Settings → Panel name* and follows the router by default.
 
 ### 6.13 Settings
 
 - **Panel name, subtitle and time zone** (the zone is used in alerts; empty follows the router).
 - **Device recognition:** DHCP fingerprints (dnsmasq logs the parameters devices ask for) and asking devices for their name and model (mDNS / UPnP, every 10 minutes); see 6.4.
-- **Panel names (passkeys):** the local name `wharf.<your LAN domain>`, and optionally a public name: the router answers it at home with the panel's address, and the certificate comes from Let's Encrypt through a Cloudflare DNS challenge (a token with *Zone → DNS → Edit*; it can be left empty when DDNS already has a Cloudflare record for that domain). It renews itself, and no port needs to be open.
+- **Panel names (public access and passkeys):** the local name `wharf.<your LAN domain>`, and optional public names (several, e.g. `wharf.example.com`):
+  - the router answers them at home; one Let's Encrypt certificate covers them all, obtained through a Cloudflare DNS challenge (account or separate token) and renewed automatically;
+  - each name shows how public DNS resolves it; one that does not point home yet can be kept up to date with *用 DDNS 维护* (an A record under the Cloudflare account, checked every 5 minutes, refreshed daily);
+  - **how the internet gets in (either or both):** *through 443* reuses the proxy extension's SNI front, which hands these names to the panel (no port in the address; 1Panel sites and proxy nodes are not affected) and passes the visitor's real address with the PROXY protocol, so access control still applies (keep the names DNS-only, grey cloud). *Open the panel port* allows the panel's port on the WAN (the same switch as LuCI's *allow access from the internet*), with `:7080` in the address;
+  - public access is subject to the panel's access control: check its internet rules (for example, your country only) before opening it.
 - **Approval for sensitive actions:** choose which actions by scoped admins need super-admin approval (plugin switches, reboot, port forwards, device controls …).
 - **Retention and thresholds:**
   - Audit 365 days, visitor log 90 days.
@@ -513,6 +518,14 @@ When you save a node, the panel generates the full Xray configuration and has Xr
 
 Keeps DNS records pointing at the router when the public IP changes. *动态域名 DDNS* in the sidebar (super admin).
 
+- **Cloudflare account (recommended):** *打开 Cloudflare 创建令牌* opens Cloudflare's token page with the permissions already chosen (read zones, edit DNS, all zones): *Continue* → *Create token*, paste it back. Then:
+  - **quick add:** pick the domain, type a subdomain (empty = the domain itself), IPv4 or IPv6 and a plan, *添加并更新*;
+  - **take over existing records:** the zone's A / AAAA / CNAME records are listed; *接管* hands one to the panel, which keeps it on the home IP (and turns the orange cloud off);
+  - the panel's own names and their certificate use the account too.
+
+  Cloudflare does offer OAuth sign-in for third-party apps, but it needs a fixed, registered callback address that a panel at wharf.lan or an IP cannot give, hence the one-click token: it can only read zones and edit DNS, and can be revoked at Cloudflare at any time.
+- **Plans:** recommended (check the IP every 5 minutes, update on change, force a write daily), real-time (every minute, forced every 12 hours), relaxed (every 30 minutes, weekly), timer only (no watching, write every 10 minutes). When editing, *how often to check* (1 / 5 / 10 / 30 minutes) and the forced refresh (6 hours to weekly, or any number of minutes up to 7 days) can be set freely.
+
 - **Providers:** Cloudflare, Alibaba Cloud DNS, Tencent Cloud DNSPod, GoDaddy, Porkbun, Namecheap, DuckDNS, any DynDNS-compatible service (No-IP, Dynu, HE.net, Oray …), and a custom URL (with `{ip}` `{domain}` `{type}`).
 - **Name:** the full name, any depth (`home.example.com`, `a.b.example.com`). Wharf finds the zone it belongs to and creates the record if it does not exist. A (IPv4) and AAAA (IPv6) are separate entries.
 - **Where the address comes from:**
@@ -520,7 +533,7 @@ Keeps DNS records pointing at the router when the public IP changes. *动态域�
   - *Interface only* or *services only*;
   - with several WANs, pick the interface; the "what is my IP" requests also leave through it;
   - services are tried in order (ipify, icanhazip, ip.sb, DNSPod, Cloudflare), and you can add your own URL. *Detect now* shows what every source sees.
-- **When to update (either or both):** as soon as the address changes (the interface is checked every minute, services every 5 minutes), and / or on a timer (5 minutes to daily).
+- **When to update (either or both):** as soon as the address changes (by default the interface is checked every minute and services every 5 minutes; adjustable), and / or a forced refresh on a timer (up to 7 days).
 - Each entry keeps a history (address changes, manual updates, failures). Failures send an alert (once per streak).
 - Credentials are stored only in the panel database and shown with the last 4 characters. Give the panel a token that can only edit DNS (each provider's note says how).
 - For Cloudflare you can choose whether the record is proxied (orange cloud); keep it off for names used by proxy nodes or port forwards.
@@ -602,7 +615,8 @@ Wharf only changes things when you use the matching feature, and uses standard c
 | Traffic counters | iptables chain `owp_acct`; ipsets `owp_up` / `owp_dn` | agent start | removed |
 | DNS query log | dnsmasq `logqueries` + `logfacility=/var/log/owp-dns.log` | first agent start | restored |
 | DHCP fingerprints | dnsmasq `logdhcp` (same log file); results in `fingerprints.json` in the data directory | while device recognition is on (default) | restored |
-| Panel names | `/etc/config/dhcp` domain sections `owpn_local` (wharf.lan) / `owpn_public` | panel start / setting a public name | removed |
+| Panel names | `/etc/config/dhcp` domain sections `owpn_local` (wharf.lan) / `owpn_p0` … | panel start / setting public names | removed |
+| Panel WAN port | firewall rule `owp_panel` + `owp.panel.open_wan` | turned on under panel names or in LuCI | removed |
 | WAN access to panel / agent | firewall rules `owp_panel` / `owp_agent` | only if you tick *allow from WAN* in LuCI | removed |
 | Static leases, local DNS | `/etc/config/dhcp` (host / domain sections) | when used | kept |
 | Scheduled reboot | root crontab (tagged `# owp-reboot`) | when set | kept (turn it off in the panel) |

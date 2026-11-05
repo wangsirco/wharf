@@ -1,5 +1,12 @@
 # Changelog · 更新日志
 
+## 0.18.3 — Cloudflare account, public panel access, clearer alerts · Cloudflare 账户、面板公网访问、告警排版
+
+- Cloudflare account for DDNS: one-click token page with the permissions chosen, then pick a domain, add or take over records; plans plus custom check / forced-refresh intervals (up to 7 days) · DDNS 连接 Cloudflare 账户，快速方案与自定义
+- Public panel access on several names: through the 443 SNI front (real visitor IP via PROXY protocol, access control applies) and / or the panel port; one Let's Encrypt certificate for all names; one-click DDNS for a name · 面板公网访问（443 或独立端口，多个域名）
+- Alerts: icon per kind, device names in bold, one block per device; devices arriving together within a few minutes come as one message · 告警排版与合并
+- Fix: the sidebar scrolls on its own · 修复侧边栏不能单独滚动
+
 ## 0.18.2 — passkeys and device recognition · Passkey 登录与设备识别
 
 - Passkey sign-in (Face ID / fingerprint / security key) next to the password, on the local name wharf.lan or an optional public name with a Let's Encrypt certificate (Cloudflare DNS challenge) · Passkey 登录；本地域名 wharf.lan 与可选公网域名 + Let's Encrypt

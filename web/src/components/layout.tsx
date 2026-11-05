@@ -56,7 +56,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const brand = useBrand()
   const { can, isSuper } = useAuth()
   return (
-    <nav className="flex h-full flex-col gap-6 px-3 py-4">
+    <nav className="flex h-full flex-col gap-6 overflow-y-auto overscroll-contain px-3 py-4">
       <div className="flex items-center gap-2.5 px-2">
         <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-b from-[#3b8bf6] to-[#1d5fe0] text-white"><BrandMark className="size-5" /></div>
         <div className="min-w-0 leading-tight">

@@ -57,6 +57,9 @@ type DDNSSource struct {
 	// Target of a CNAME record: an existing dynamic name (another DDNS client keeps
 	// it pointed at home), so a new subdomain needs no address of its own
 	Target string `json:"target,omitempty"`
+	// CheckMin: how often to look for a new address, in minutes (0 = every minute for an
+	// interface, every 5 for public services); Interval is the forced refresh on top
+	CheckMin int `json:"check_min,omitempty"`
 }
 
 type ddnsProvider struct {
@@ -149,7 +152,7 @@ func (a *App) handleDDNS(w http.ResponseWriter, r *http.Request) {
 	for _, d := range list {
 		p := providerOf(d.Provider)
 		for k, v := range d.Creds {
-			if p != nil && (k == "server" || k == "username" || k == "url" || k == "method" || k == "body") {
+			if p != nil && (k == "server" || k == "username" || k == "url" || k == "method" || k == "body" || v == accountTokenMarker) {
 				continue
 			}
 			d.Creds[k] = maskSecret(v)
@@ -236,8 +239,11 @@ func (d *DDNS) normalize() error {
 		}
 	}
 	d.Source.APIs = apis
-	if d.Interval < 0 || d.Interval > 1440 {
-		return errors.New("定时间隔应在 0–1440 分钟")
+	if d.Interval < 0 || d.Interval > 10080 {
+		return errors.New("强制更新间隔应在 0–10080 分钟（最长 7 天）")
+	}
+	if d.Source.CheckMin < 0 || d.Source.CheckMin > 1440 {
+		return errors.New("检测间隔应在 1–1440 分钟")
 	}
 	if d.Interval > 0 && d.Interval < 1 {
 		d.Interval = 1
@@ -291,19 +297,20 @@ func (a *App) handleDDNSSave(w http.ResponseWriter, r *http.Request) {
 	if d.Creds == nil {
 		d.Creds = map[string]string{}
 	}
+	// Cloudflare without a token of its own: the account's
+	if d.Provider == "cloudflare" && strings.TrimSpace(d.Creds["token"]) == "" && a.setting("cloudflare.token") != "" {
+		d.Creds["token"] = accountTokenMarker
+	}
 	if err := d.normalize(); err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
 	creds, src := mustJSON(d.Creds), mustJSON(d.Source)
 	if d.ID == 0 {
-		res, err := a.db.Exec(`INSERT INTO ddns(name, enabled, provider, creds, domain, rtype, source, interval_min, on_change, ttl, proxied, created)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, d.Name, d.Enabled, d.Provider, creds, d.Domain, d.RType, src, d.Interval, d.OnChange, d.TTL, d.Proxied, time.Now().Unix())
-		if err != nil {
+		if _, err := a.insertDDNS(&d); err != nil {
 			jsonErr(w, 500, err.Error())
 			return
 		}
-		d.ID, _ = res.LastInsertId()
 	} else {
 		if _, err := a.db.Exec(`UPDATE ddns SET name=?, enabled=?, provider=?, creds=?, domain=?, rtype=?, source=?, interval_min=?, on_change=?, ttl=?, proxied=?,
 			last_ip=CASE WHEN domain=? AND rtype=? AND provider=? THEN last_ip ELSE '' END WHERE id=?`,
@@ -320,6 +327,34 @@ func (a *App) handleDDNSSave(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("%s DDNS「%s」（%s · %s）", verb, d.Name, providerOf(d.Provider).Name, d.Domain), ddnsAudit(before), ddnsAudit(&d), false)
 	a.kickDDNS()
 	writeJSON(w, 200, map[string]any{"id": d.ID})
+}
+
+func (a *App) insertDDNS(d *DDNS) (int64, error) {
+	res, err := a.db.Exec(`INSERT INTO ddns(name, enabled, provider, creds, domain, rtype, source, interval_min, on_change, ttl, proxied, created)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, d.Name, d.Enabled, d.Provider, mustJSON(d.Creds), d.Domain, d.RType, mustJSON(d.Source), d.Interval, d.OnChange, d.TTL, d.Proxied, time.Now().Unix())
+	if err != nil {
+		return 0, err
+	}
+	d.ID, _ = res.LastInsertId()
+	return d.ID, nil
+}
+
+// createDDNS checks and stores a new entry (used by the panel's own names).
+func (a *App) createDDNS(d *DDNS) (int64, error) {
+	if err := d.normalize(); err != nil {
+		return 0, err
+	}
+	list, _ := a.ddnsList()
+	for _, x := range list {
+		if x.Domain == d.Domain && x.RType == d.RType {
+			return 0, fmt.Errorf("DDNS 里已经有 %s 的 %s 记录", d.Domain, d.RType)
+		}
+	}
+	id, err := a.insertDDNS(d)
+	if err == nil {
+		a.kickDDNS()
+	}
+	return id, err
 }
 
 func ddnsAudit(d *DDNS) any {
@@ -609,6 +644,9 @@ func (a *App) ddnsLoop() {
 				if d.Source.Mode == "api" {
 					every = 5 * time.Minute
 				}
+				if d.Source.CheckMin > 0 {
+					every = time.Duration(d.Source.CheckMin) * time.Minute
+				}
 				if now.Sub(lastCheck[d.ID]) < every && d.LastIP != "" {
 					continue
 				}
@@ -793,7 +831,7 @@ func cfZone(call func(string, string, any, any) error, domain string) (string, e
 }
 
 func cfUpdate(d *DDNS, ip string) (string, error) {
-	call := cfCall(d.Creds["token"])
+	call := cfCall(cfTokenOf(d.Creds["token"]))
 	zoneID, err := cfZone(call, d.Domain)
 	if err != nil {
 		return "", err

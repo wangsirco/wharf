@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,17 +27,28 @@ import (
 )
 
 // Names for the panel. Passkeys only work on a domain name with a certificate the
-// browser trusts, never on an IP address, so the panel can be reached as:
+// browser trusts, never on an IP address, and a name is also how the panel is opened
+// from outside:
 //
 //   - wharf.<LAN domain> (wharf.lan): dnsmasq answers it with the router's LAN address and
 //     the panel's own certificate covers it; devices trust it once the panel's CA is installed.
-//   - a public name of the owner's (panel.example.com): dnsmasq answers it at home too, and
-//     the certificate comes from Let's Encrypt through a DNS-01 challenge on Cloudflare,
-//     so no device needs anything installed and no port has to be open.
+//   - public names of the owner's (wharf.example.com, several allowed): dnsmasq answers them
+//     at home too, and one Let's Encrypt certificate covers them all through a DNS-01
+//     challenge on Cloudflare, so no device needs anything installed. From the internet they
+//     are reached through the 443 SNI front (no port in the address; the front passes the
+//     visitor's address on with the PROXY protocol, so access control still sees it) and / or
+//     the panel's own port opened on the WAN.
 //
-// The dnsmasq records are uci "domain" sections owpn_local / owpn_public.
+// The dnsmasq records are uci "domain" sections owpn_local and owpn_p<i>.
 
-const localPanelHost = "wharf"
+const (
+	localPanelHost = "wharf"
+	// panelProxyPort: the panel's loopback TLS listener behind the 443 front (PROXY protocol v2)
+	panelProxyPort = 20090
+)
+
+// PanelProxyPort is panelProxyPort for the panel's main.
+const PanelProxyPort = panelProxyPort
 
 // LocalPanelName is the panel's LAN name for a dnsmasq domain.
 func LocalPanelName(domain string) string { return localPanelHost + "." + domain }
@@ -83,13 +96,28 @@ func (a *App) localPanelName() string {
 	return LocalPanelName(d)
 }
 
-// passkeyHosts are the names passkeys can be used on.
-func (a *App) passkeyHosts() []string {
-	out := []string{a.localPanelName()}
-	if p := a.setting("panel.public_name"); p != "" {
-		out = append(out, p)
+// publicNames: the owner's names for the panel (setting panel.public_names, a JSON list;
+// 0.18.2 kept one name in panel.public_name).
+func (a *App) publicNames() []string {
+	var out []string
+	_ = json.Unmarshal([]byte(a.setting("panel.public_names")), &out)
+	if len(out) == 0 && a.setting("panel.public_name") != "" {
+		out = []string{a.setting("panel.public_name")}
 	}
 	return out
+}
+
+// passkeyHosts are the names passkeys can be used on.
+func (a *App) passkeyHosts() []string {
+	return append([]string{a.localPanelName()}, a.publicNames()...)
+}
+
+// panelFrontRoute: what the 443 front should send to the panel (nil = nothing).
+func (a *App) panelFrontRoute() []string {
+	if a.setting("panel.via_443") != "1" {
+		return nil
+	}
+	return a.publicNames()
 }
 
 // syncPanelNames keeps the dnsmasq records for the panel's names.
@@ -102,14 +130,19 @@ func (a *App) syncPanelNames() error {
 	if err != nil {
 		return err
 	}
-	want := map[string]string{"owpn_local": a.localPanelName(), "owpn_public": a.setting("panel.public_name")}
+	want := map[string]string{"owpn_local": a.localPanelName()}
+	for i, n := range a.publicNames() {
+		want["owpn_p"+strconv.Itoa(i)] = n
+	}
 	var changes []UciChange
+	for sec := range dhcp {
+		if (sec == "owpn_public" || strings.HasPrefix(sec, "owpn_p")) && want[sec] == "" {
+			changes = append(changes, UciChange{Op: "delete", Config: "dhcp", Section: sec})
+		}
+	}
 	for sec, name := range want {
 		cur, ok := dhcp[sec]
 		switch {
-		case name == "" && ok:
-			changes = append(changes, UciChange{Op: "delete", Config: "dhcp", Section: sec})
-		case name == "":
 		case !ok:
 			changes = append(changes, UciChange{Op: "add", Config: "dhcp", Type: "domain", Name: sec, Values: map[string]any{"name": name, "ip": ip}})
 		case optStr(cur, "name") != name || optStr(cur, "ip") != ip:
@@ -123,59 +156,68 @@ func (a *App) syncPanelNames() error {
 	return err
 }
 
-// ---- public name: Let's Encrypt over Cloudflare DNS ----
+// ---- public names: one Let's Encrypt certificate over Cloudflare DNS ----
 
 var pubCert struct {
 	sync.RWMutex
-	name string
-	cert *tls.Certificate
-	exp  time.Time
-	err  string
-	busy bool
+	names []string
+	cert  *tls.Certificate
+	exp   time.Time
+	err   string
+	busy  bool
 }
 
 func (a *App) tlsDir() string { return a.cfg.Path("tls") }
 
-// PublicCertificate serves the Let's Encrypt certificate for the public name (nil = not
-// this name, the local certificate answers).
+// PublicCertificate serves the Let's Encrypt certificate for a public name (nil = not one
+// of them: the local certificate answers).
 func (a *App) PublicCertificate(h *tls.ClientHelloInfo) *tls.Certificate {
 	pubCert.RLock()
 	defer pubCert.RUnlock()
-	if pubCert.cert != nil && strings.EqualFold(h.ServerName, pubCert.name) {
+	if pubCert.cert != nil && slices.ContainsFunc(pubCert.names, func(n string) bool { return strings.EqualFold(n, h.ServerName) }) {
 		return pubCert.cert
 	}
 	return nil
 }
 
+// loadPublicCert picks up the stored certificate if it covers every public name.
 func (a *App) loadPublicCert() {
-	name := a.setting("panel.public_name")
+	ns := a.publicNames()
 	pair, err := tls.LoadX509KeyPair(filepath.Join(a.tlsDir(), "public.crt"), filepath.Join(a.tlsDir(), "public.key"))
 	pubCert.Lock()
 	defer pubCert.Unlock()
-	pubCert.name, pubCert.cert = name, nil
-	if err != nil || name == "" {
+	pubCert.names, pubCert.cert = ns, nil
+	if err != nil || len(ns) == 0 {
 		return
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil || leaf.VerifyHostname(name) != nil {
+	if err != nil {
 		return
+	}
+	for _, n := range ns {
+		if leaf.VerifyHostname(n) != nil {
+			return
+		}
 	}
 	pubCert.cert, pubCert.exp = &pair, leaf.NotAfter
 }
 
-// cfTokenFor: the token set for the panel, else a Cloudflare DDNS entry's token for the
-// same domain.
+// cfTokenFor: the panel's own token, else the Cloudflare account, else a Cloudflare DDNS
+// entry's token for the same domain.
 func (a *App) cfTokenFor(name string) string {
 	if t := a.setting("panel.cf_token"); t != "" {
+		return t
+	}
+	if t := a.setting("cloudflare.token"); t != "" {
 		return t
 	}
 	list, _ := a.ddnsList()
 	zones := zoneCandidates(name)
 	for _, d := range list {
-		if d.Provider == "cloudflare" && d.Creds["token"] != "" {
+		if t := cfTokenOf(d.Creds["token"]); d.Provider == "cloudflare" && t != "" {
 			for _, z := range zoneCandidates(d.Domain) {
 				if slices.Contains(zones, z) && strings.Contains(z, ".") {
-					return d.Creds["token"]
+					return t
 				}
 			}
 		}
@@ -185,20 +227,11 @@ func (a *App) cfTokenFor(name string) string {
 
 var acmeDirectory = acme.LetsEncryptURL
 
-// obtainPublicCert gets (or renews) the certificate for the public name.
+// obtainPublicCert gets (or renews) one certificate for every public name.
 func (a *App) obtainPublicCert(ctx context.Context) error {
-	name := a.setting("panel.public_name")
-	if name == "" {
+	ns := a.publicNames()
+	if len(ns) == 0 {
 		return nil
-	}
-	token := a.cfTokenFor(name)
-	if token == "" {
-		return errors.New("需要 Cloudflare API 令牌（Zone.DNS 编辑权限），或者在 DDNS 里有这个域名的 Cloudflare 记录")
-	}
-	call := cfCall(token)
-	zone, err := cfZone(call, name)
-	if err != nil {
-		return err
 	}
 	accountKey, err := loadOrCreateKey(filepath.Join(a.tlsDir(), "acme-account.key"))
 	if err != nil {
@@ -208,7 +241,7 @@ func (a *App) obtainPublicCert(ctx context.Context) error {
 	if _, err := cl.Register(ctx, &acme.Account{}, acme.AcceptTOS); err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
 		return fmt.Errorf("Let's Encrypt 注册失败：%v", err)
 	}
-	order, err := cl.AuthorizeOrder(ctx, acme.DomainIDs(name))
+	order, err := cl.AuthorizeOrder(ctx, acme.DomainIDs(ns...))
 	if err != nil {
 		return fmt.Errorf("Let's Encrypt：%v", err)
 	}
@@ -219,6 +252,16 @@ func (a *App) obtainPublicCert(ctx context.Context) error {
 		}
 		if z.Status == acme.StatusValid {
 			continue
+		}
+		name := z.Identifier.Value
+		token := a.cfTokenFor(name)
+		if token == "" {
+			return fmt.Errorf("%s：需要 Cloudflare 账户或令牌（区域 → DNS → 编辑）", name)
+		}
+		call := cfCall(token)
+		zone, err := cfZone(call, name)
+		if err != nil {
+			return fmt.Errorf("%s：%v", name, err)
 		}
 		var ch *acme.Challenge
 		for _, c := range z.Challenges {
@@ -246,7 +289,7 @@ func (a *App) obtainPublicCert(ctx context.Context) error {
 			return err
 		}
 		if _, err := cl.WaitAuthorization(ctx, z.URI); err != nil {
-			return fmt.Errorf("域名验证没有通过：%v", err)
+			return fmt.Errorf("%s 验证没有通过：%v", name, err)
 		}
 	}
 	if order, err = cl.WaitOrder(ctx, order.URI); err != nil {
@@ -256,7 +299,7 @@ func (a *App) obtainPublicCert(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{name}}, key)
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: ns}, key)
 	if err != nil {
 		return err
 	}
@@ -276,11 +319,11 @@ func (a *App) obtainPublicCert(ctx context.Context) error {
 		return err
 	}
 	a.loadPublicCert()
-	log.Printf("panel: Let's Encrypt certificate for %s", name)
+	log.Printf("panel: Let's Encrypt certificate for %s", strings.Join(ns, ", "))
 	return nil
 }
 
-// waitTXT polls public resolvers until the challenge record is visible (or time runs out:
+// waitTXT polls a public resolver until the challenge record is visible (or time runs out:
 // Let's Encrypt may still see it).
 func waitTXT(ctx context.Context, name, val string, max time.Duration) {
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -316,30 +359,30 @@ func loadOrCreateKey(path string) (crypto.Signer, error) {
 	return k, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600)
 }
 
-// renewPublicCert runs in the background: a new name, or under 30 days left.
+// renewPublicCert runs in the background: new names, or under 30 days left.
 func (a *App) renewPublicCert(force bool) {
-	name := a.setting("panel.public_name")
+	ns := a.publicNames()
 	pubCert.Lock()
-	need := name != "" && (force || pubCert.cert == nil || pubCert.name != name || time.Until(pubCert.exp) < 30*24*time.Hour)
+	need := len(ns) > 0 && (force || pubCert.cert == nil || !slices.Equal(pubCert.names, ns) || time.Until(pubCert.exp) < 30*24*time.Hour)
 	if !need || pubCert.busy {
 		pubCert.Unlock()
 		return
 	}
 	pubCert.busy = true
 	pubCert.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	err := a.obtainPublicCert(ctx)
 	pubCert.Lock()
 	pubCert.busy, pubCert.err = false, ""
 	if err != nil {
 		pubCert.err = err.Error()
-		log.Printf("panel: certificate for %s: %v", name, err)
+		log.Printf("panel: certificate for %v: %v", ns, err)
 	}
 	pubCert.Unlock()
 }
 
-// panelNamesLoop: dnsmasq records now and then, the public certificate daily.
+// panelNamesLoop: dnsmasq records and the WAN port now and then, the certificate daily.
 func (a *App) panelNamesLoop() {
 	time.Sleep(10 * time.Second)
 	a.loadPublicCert()
@@ -347,24 +390,72 @@ func (a *App) panelNamesLoop() {
 		if err := a.syncPanelNames(); err != nil {
 			log.Printf("panel names: %v", err)
 		}
-		if i%96 == 0 { // daily (every 15 min otherwise)
+		if i%96 == 0 { // daily (every 15 minutes otherwise)
 			a.renewPublicCert(false)
 		}
 		time.Sleep(15 * time.Minute)
 	}
 }
 
-// GET /api/panel/names (super)
-func (a *App) handlePanelNames(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, a.panelNamesState())
+// ---- HTTP ----
+
+type nameStatus struct {
+	Name     string   `json:"name"`
+	Resolves []string `json:"resolves"` // what public DNS answers
+	Points   bool     `json:"points"`   // ... at the router's WAN address
+	DDNS     int64    `json:"ddns"`     // the DDNS entry keeping it up to date (0 = none)
 }
 
-func (a *App) panelNamesState() map[string]any {
+func publicLookup(name string) []string {
+	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "udp", "1.1.1.1:53")
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	ips, _ := r.LookupHost(ctx, name)
+	return ips
+}
+
+// GET /api/panel/names (super)
+func (a *App) handlePanelNames(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, a.panelNamesState(r.URL.Query().Get("dns") == "1"))
+}
+
+func (a *App) panelNamesState(withDNS bool) map[string]any {
 	_, port, _ := net.SplitHostPort(a.cfg.Listen)
+	var wanIPs []string
+	for _, w := range a.wans() {
+		if w.IPv4 != "" {
+			wanIPs = append(wanIPs, w.IPv4)
+		}
+	}
+	ddns, _ := a.ddnsList()
+	var st []nameStatus
+	for _, n := range a.publicNames() {
+		s := nameStatus{Name: n, Resolves: []string{}}
+		for _, d := range ddns {
+			if d.Domain == n {
+				s.DDNS = d.ID
+			}
+		}
+		if withDNS {
+			if ips := publicLookup(n); ips != nil {
+				s.Resolves = ips
+			}
+			s.Points = slices.ContainsFunc(s.Resolves, func(ip string) bool { return slices.Contains(wanIPs, ip) })
+		}
+		st = append(st, s)
+	}
+	if st == nil {
+		st = []nameStatus{}
+	}
+	ext, _ := a.proxyExt()
 	pubCert.RLock()
 	defer pubCert.RUnlock()
-	out := map[string]any{"local": a.localPanelName(), "port": port, "public": a.setting("panel.public_name"),
-		"token_set": a.setting("panel.cf_token") != "", "token_from_ddns": a.setting("panel.cf_token") == "" && a.setting("panel.public_name") != "" && a.cfTokenFor(a.setting("panel.public_name")) != "",
+	out := map[string]any{"local": a.localPanelName(), "port": port, "names": st,
+		"via_443": a.setting("panel.via_443") == "1", "via_port": a.setting("panel.via_port") == "1",
+		"front_ready": ext.Installed, "wan_ips": wanIPs,
+		"token_set": a.setting("panel.cf_token") != "", "account": a.setting("cloudflare.token") != "",
 		"cert_busy": pubCert.busy, "cert_error": pubCert.err}
 	if pubCert.cert != nil {
 		out["cert_expires"] = pubCert.exp.Unix()
@@ -372,35 +463,110 @@ func (a *App) panelNamesState() map[string]any {
 	return out
 }
 
-// POST /api/panel/names {public, token} — set or clear the public name (super).
+// POST /api/panel/names {names, token, via_443, via_port} — the public names and how the
+// internet reaches them (super).
 func (a *App) handlePanelNamesSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Public string `json:"public"`
-		Token  string `json:"token"`
+		Names   []string `json:"names"`
+		Token   string   `json:"token"`
+		Via443  bool     `json:"via_443"`
+		ViaPort bool     `json:"via_port"`
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
 		return
 	}
-	name := strings.ToLower(strings.TrimSpace(req.Public))
-	if name != "" && (!hostnameOK(name) || strings.HasSuffix(name, ".lan") || strings.HasSuffix(name, ".local")) {
-		jsonErr(w, 400, "请填写你自己的公网域名，例如 panel.example.com")
+	var ns []string
+	for _, n := range req.Names {
+		n = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(n), "."))
+		if n == "" || slices.Contains(ns, n) {
+			continue
+		}
+		if !hostnameOK(n) || strings.HasSuffix(n, ".lan") || strings.HasSuffix(n, ".local") {
+			jsonErr(w, 400, n+"：请填写你自己的公网域名，例如 wharf.example.com")
+			return
+		}
+		if owner := onePanelOwner(n); owner != nil {
+			jsonErr(w, 400, n+" 是 1Panel 网站「"+owner.Domain+"」的域名，请换一个")
+			return
+		}
+		ns = append(ns, n)
+	}
+	if len(ns) > 8 {
+		jsonErr(w, 400, "最多 8 个域名")
 		return
 	}
-	old := a.setting("panel.public_name")
-	_ = a.setSetting("panel.public_name", name)
+	if len(ns) > 0 && req.Via443 {
+		if ext, _ := a.proxyExt(); !ext.Installed {
+			jsonErr(w, 400, "通过 443 进入需要代理扩展的 443 分流器（「代理」页安装扩展）；也可以只用独立端口")
+			return
+		}
+		nodes, _ := a.proxyNodes()
+		for _, n := range nodes {
+			for _, s := range n.sniNames() {
+				if slices.Contains(ns, s) {
+					jsonErr(w, 400, s+" 已被代理节点「"+n.Name+"」使用")
+					return
+				}
+			}
+		}
+	}
+	old := a.publicNames()
+	_ = a.setSetting("panel.public_names", mustJSON(ns))
+	_ = a.setSetting("panel.public_name", "")
 	if t := strings.TrimSpace(req.Token); t != "" && !strings.HasPrefix(t, "••") {
 		_ = a.setSetting("panel.cf_token", t)
 	}
-	if name == "" {
+	if len(ns) == 0 {
+		req.Via443, req.ViaPort = false, false
 		_ = a.setSetting("panel.cf_token", "")
 	}
+	_ = a.setSetting("panel.via_443", boolStr(req.Via443))
+	_ = a.setSetting("panel.via_port", boolStr(req.ViaPort))
 	if err := a.syncPanelNames(); err != nil {
 		log.Printf("panel names: %v", err)
 	}
+	if err := a.agent.Do("POST", "/v1/panel/wan", map[string]bool{"on": req.ViaPort}, nil); err != nil {
+		jsonErr(w, 500, "开放面板端口失败："+err.Error())
+		return
+	}
+	if ext, _ := a.proxyExt(); ext.Installed {
+		if err := a.reapplyProxy(); err != nil {
+			jsonErr(w, 400, "443 分流器更新失败："+err.Error())
+			return
+		}
+	}
 	a.loadPublicCert()
-	go a.renewPublicCert(name != old)
-	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "setting.update", "setting", "panel.public_name", "设置面板公网域名 "+firstNonEmpty(name, "（清除）"), old, name, false)
+	go a.renewPublicCert(!slices.Equal(old, ns))
+	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "setting.update", "setting", "panel.public_names",
+		fmt.Sprintf("面板公网域名：%s（443：%v，独立端口：%v）", firstNonEmpty(strings.Join(ns, "、"), "无"), req.Via443, req.ViaPort), old, ns, false)
 	time.Sleep(300 * time.Millisecond) // let the renewal mark itself busy
-	writeJSON(w, 200, a.panelNamesState())
+	writeJSON(w, 200, a.panelNamesState(false))
+}
+
+// POST /api/panel/names/ddns {name} — keep a public name pointed at home with a DDNS entry
+// on the Cloudflare account (A record, checked every 5 minutes, refreshed daily).
+func (a *App) handlePanelNameDDNS(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	_ = readJSON(r, &req)
+	if !slices.Contains(a.publicNames(), req.Name) {
+		jsonErr(w, 400, "不是面板的公网域名")
+		return
+	}
+	if a.setting("cloudflare.token") == "" {
+		jsonErr(w, 400, "请先在「动态域名 DDNS」页连接 Cloudflare 账户")
+		return
+	}
+	d := DDNS{Name: "面板 " + req.Name, Enabled: true, Provider: "cloudflare", Creds: map[string]string{"token": accountTokenMarker},
+		Domain: req.Name, RType: "A", Source: DDNSSource{Mode: "auto", CheckMin: 5}, Interval: 1440, OnChange: true, TTL: 300}
+	id, err := a.createDDNS(&d)
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "ddns.save", "ddns", strconv.FormatInt(id, 10), "为面板域名 "+req.Name+" 添加 DDNS", nil, nil, false)
+	go func() { _, _, _ = a.runDDNS(&d, true) }()
+	writeJSON(w, 200, a.panelNamesState(false))
 }

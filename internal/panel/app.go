@@ -168,6 +168,7 @@ var settingDefaults = map[string]string{
 	"identity.probe":            "1",               // ask LAN devices about themselves (mDNS / UPnP) every 10 min
 	"ui.name":                   "Wharf",           // panel name on the login page, sidebar and browser tab
 	"panel.public_name":         "",                // public name with a Let's Encrypt certificate (panelname.go)
+	"cloudflare.token":          "",                // Cloudflare account token (DDNS, panel names; cloudflare.go)
 	"panel.cf_token":            "",                // Cloudflare token for its DNS-01 challenge
 	"ui.timezone":               "",                // IANA zone for times in alerts; "" = the router's zone
 	"ui.subtitle":               "OpenWrt 控制面板",    //
@@ -257,6 +258,7 @@ func (a *App) Start() {
 	go a.ddnsLoop()
 	go a.onePanelLoop()
 	go a.identityLoop()
+	cfAccountToken = func() string { return a.setting("cloudflare.token") }
 	go a.panelNamesLoop()
 	log.Printf("panel ready")
 }

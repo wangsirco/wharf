@@ -144,8 +144,12 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/alerts/channels/{id}/toggle", a.super(a.handleAlertChannelToggle))
 	m.HandleFunc("POST /api/alerts/test", a.super(a.handleAlertTest))
 	m.HandleFunc("POST /api/alerts/telegram/chats", a.super(a.handleTelegramChats))
+	m.HandleFunc("GET /api/cloudflare", a.super(a.handleCloudflare))
+	m.HandleFunc("POST /api/cloudflare", a.super(a.handleCloudflareSave))
+	m.HandleFunc("GET /api/cloudflare/records", a.super(a.handleCloudflareRecords))
 	m.HandleFunc("GET /api/panel/names", a.super(a.handlePanelNames))
 	m.HandleFunc("POST /api/panel/names", a.super(a.handlePanelNamesSave))
+	m.HandleFunc("POST /api/panel/names/ddns", a.super(a.handlePanelNameDDNS))
 	m.HandleFunc("GET /api/access/me", a.super(a.handleAccessMe))
 	m.HandleFunc("PUT /api/settings", a.super(a.handleSettingsUpdate))
 	m.HandleFunc("GET /api/agent/status", a.super(a.handleAgentStatus))
@@ -528,7 +532,7 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a.publicSettings())
 }
 
-var secretSettings = []string{"nextdns.api_key", "pve.token", "panel.cf_token"}
+var secretSettings = []string{"nextdns.api_key", "pve.token", "panel.cf_token", "cloudflare.token"}
 
 // publicSettings hides secrets and internal cursors.
 func (a *App) publicSettings() map[string]string {

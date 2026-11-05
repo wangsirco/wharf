@@ -302,7 +302,7 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 			}
 		}
 	}
-	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb, port == 443)
+	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb, port == 443, a.panelFrontRoute())
 	if frontOn && len(owners443) > 0 && mode == "" {
 		return fmt.Errorf("WAN %d 已转发给「%s」。要共用这个端口，请在「扩展设置」里选择共用方式，或者让节点用独立端口", port, displayRule(fw[owners443[0]], nil))
 	}
@@ -1433,7 +1433,7 @@ func (a *App) handleProxyLinks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, l)
 	}
 	sub, selfSigned := "", false
-	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil, ps.port() == 443); on {
+	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil, ps.port() == 443, nil); on {
 		subHost := firstNonEmpty(ps.Site.Domain, host)
 		sub = "https://" + subHost + "/sub/" + p.SubToken
 		if ps.port() != 443 {

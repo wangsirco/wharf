@@ -124,7 +124,7 @@ func TestXrayAcceptsConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("xray rejected the config: %v\n%s\n%s", err, out, cfg)
 	}
-	front, ok := buildFront(nodes, frontSite{Mode: "builtin", Domain: "home.example.com"}, "", nil, true)
+	front, ok := buildFront(nodes, frontSite{Mode: "builtin", Domain: "home.example.com"}, "", nil, true, nil)
 	if !ok || !json.Valid([]byte(front)) {
 		t.Fatalf("front: %v %s", ok, front)
 	}

@@ -339,47 +339,90 @@ function UpdateSettings({ draft, setDraft }: { draft: Settings; setDraft: (d: Se
   )
 }
 
-interface Names { local: string; port: string; public: string; token_set: boolean; token_from_ddns: boolean; cert_busy: boolean; cert_error: string; cert_expires?: number }
+interface NameStatus { name: string; resolves: string[]; points: boolean; ddns: number }
+interface Names {
+  local: string; port: string; names: NameStatus[]; via_443: boolean; via_port: boolean; front_ready: boolean; wan_ips: string[] | null
+  token_set: boolean; account: boolean; cert_busy: boolean; cert_error: string; cert_expires?: number
+}
 
-// PanelNames: the addresses passkeys work on (a domain name with a trusted certificate).
+// PanelNames: the panel's names — passkeys need one, and the public ones open the panel
+// from outside (through the 443 front and / or the panel's own port).
 function PanelNames() {
-  const { data, reload } = useApi<Names>('/panel/names', 8000)
-  const [f, setF] = useState<{ public: string; token: string } | null>(null)
+  const { data, reload } = useApi<Names>('/panel/names?dns=1', 15000)
+  const [f, setF] = useState<{ names: string; token: string; via_443: boolean; via_port: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   if (!data) return null
-  const v = f ?? { public: data.public, token: data.token_set ? '••••••••' : '' }
-  const url = (h: string) => `https://${h}${data.port && data.port !== '443' ? ':' + data.port : ''}`
-  const save = async (clear = false) => {
+  const v = f ?? { names: data.names.map((n) => n.name).join('\n'), token: data.token_set ? '••••••••' : '', via_443: data.via_443, via_port: data.via_port }
+  const list = v.names.split(/[\s,，]+/).filter(Boolean)
+  const url = (h: string, p?: string) => `https://${h}${p && p !== '443' ? ':' + p : ''}`
+  const save = async () => {
     setBusy(true)
-    try { await post('/panel/names', clear ? { public: '', token: '' } : v); setF(null); toast.success(clear ? '已清除公网域名' : '已保存，正在申请证书'); reload() }
+    try { await post('/panel/names', { ...v, names: list }); setF(null); toast.success(list.length ? '已保存，正在申请证书' : '已清除公网域名'); reload() }
     catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
+  const ddns = async (name: string) => {
+    try { await post('/panel/names/ddns', { name }); toast.success(`已用 DDNS 维护 ${name}`); reload() } catch (e) { toast.error((e as Error).message) }
+  }
   return (
-    <Section title="面板域名（Passkey）" desc="Passkey 只能在域名上使用，而且浏览器要信任证书。下面两个地址都可以用来打开面板。" className="xl:col-span-2">
+    <Section title="面板域名（公网访问与 Passkey）" desc="Passkey 只能在域名上使用；公网域名还能让你在外面打开面板。公网访问仍受「面板访问控制」限制（目前按地区）。" className="xl:col-span-2">
       <div className="grid gap-5 p-4 lg:grid-cols-2">
         <div className="grid content-start gap-2">
           <div className="text-sm font-medium">本地域名</div>
-          <a className="font-mono text-sm text-primary underline" href={url(data.local)}>{url(data.local)}</a>
-          <p className="text-xs text-muted-foreground">家里的设备直接可用（路由器自己解析）。证书由面板签发：每台要用 Passkey 的设备先安装一次面板证书（登录页「证书」里有下载和各系统步骤），之后浏览器不再提示不安全。</p>
+          <a className="font-mono text-sm text-primary underline" href={url(data.local, data.port)}>{url(data.local, data.port)}</a>
+          <p className="text-xs text-muted-foreground">家里的设备直接可用（路由器自己解析）。证书由面板签发：每台要用 Passkey 的设备先安装一次面板证书（登录页「证书」里有下载和各系统步骤）。</p>
+          {data.names.length > 0 && (
+            <div className="mt-3 grid gap-1.5">
+              <div className="text-sm font-medium">公网域名状态</div>
+              {data.names.map((n) => ({ ...n, resolves: n.resolves ?? [] })).map((n) => (
+                <div key={n.name} className="rounded-lg border px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2"><Dot tone={n.points ? 'ok' : n.resolves.length ? 'warn' : 'bad'} /><span className="font-mono text-sm">{n.name}</span></div>
+                  <div className="mt-0.5 text-muted-foreground">
+                    {n.points ? `解析正确（${n.resolves.join('、')}）` : n.resolves.length ? `解析到 ${n.resolves.join('、')}，不是家里的公网 IP（${(data.wan_ips ?? []).join('、') || '未知'}）；开了橙色云也会这样` : '公网还解析不到'}
+                    {n.ddns ? ' · DDNS 维护中' : ''}
+                  </div>
+                  {!n.ddns && !n.points && (
+                    data.account
+                      ? <Button size="sm" variant="outline" className="mt-1.5 h-7" onClick={() => ddns(n.name)}>用 DDNS 维护（Cloudflare 账户）</Button>
+                      : <div className="mt-1">在「动态域名 DDNS」页连接 Cloudflare 账户后，可以一键让它跟随家里的 IP。</div>
+                  )}
+                  {data.via_443 && <div className="mt-1">外网地址：<a className="text-primary underline" href={url(n.name)}>{url(n.name)}</a>{data.via_port && <>　或　<a className="text-primary underline" href={url(n.name, data.port)}>{url(n.name, data.port)}</a></>}</div>}
+                  {!data.via_443 && data.via_port && <div className="mt-1">外网地址：<a className="text-primary underline" href={url(n.name, data.port)}>{url(n.name, data.port)}</a></div>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="grid content-start gap-2">
-          <div className="text-sm font-medium">公网域名（可选）</div>
-          <p className="text-xs text-muted-foreground">用你自己的域名，比如 panel.example.com：家里由路由器直接解析到面板，证书通过 Cloudflare 的 DNS 验证自动向 Let's Encrypt 申请（不用开放端口），所有设备都不用装证书。</p>
-          <Field label="域名"><Input value={v.public} placeholder="panel.example.com" onChange={(e) => setF({ ...v, public: e.target.value.trim().toLowerCase() })} /></Field>
-          <Field label="Cloudflare API 令牌" hint={data.token_from_ddns ? '留空：会使用 DDNS 里这个域名的 Cloudflare 令牌' : '需要「区域 → DNS → 编辑」权限；如果 DDNS 里已有这个域名的 Cloudflare 记录，可以留空'}>
-            <Input type="password" autoComplete="off" value={v.token} onChange={(e) => setF({ ...v, token: e.target.value })} />
+        <div className="grid content-start gap-3">
+          <div className="text-sm font-medium">公网域名（可选，可以多个）</div>
+          <Field label="域名" hint="一行一个，例如 wharf.example.com。会一起申请一张 Let's Encrypt 证书（Cloudflare DNS 验证，不用开放端口），家里由路由器直接解析到面板。">
+            <textarea className="min-h-20 rounded-md border bg-background px-3 py-2 font-mono text-sm" value={v.names} placeholder="wharf.example.com" onChange={(e) => setF({ ...v, names: e.target.value })} />
           </Field>
-          {data.public && (
+          {!data.account && (
+            <Field label="Cloudflare API 令牌" hint="更方便的做法：在「动态域名 DDNS」页连接 Cloudflare 账户，这里就可以留空">
+              <Input type="password" autoComplete="off" value={v.token} onChange={(e) => setF({ ...v, token: e.target.value })} />
+            </Field>
+          )}
+          <div className="grid gap-2 rounded-lg border p-3">
+            <div className="text-xs font-medium text-muted-foreground">从外网怎么进来（可以都开）</div>
+            <label className="flex items-start justify-between gap-3">
+              <span><span className="text-sm">通过 443，地址不带端口</span><span className="block text-xs text-muted-foreground">{data.front_ready ? '复用代理扩展的 443 分流器，按域名交给面板；1Panel 网站和代理节点不受影响。域名请保持「仅 DNS」（灰色云）。' : '需要先在「代理」页安装代理扩展（它的 443 分流器负责按域名分发）。'}</span></span>
+              <Switch checked={v.via_443} disabled={!data.front_ready} onCheckedChange={(c) => setF({ ...v, via_443: !!c })} />
+            </label>
+            <label className="flex items-start justify-between gap-3">
+              <span><span className="text-sm">开放面板端口 {data.port}</span><span className="block text-xs text-muted-foreground">在 WAN 上放行 {data.port}（和 LuCI 里「允许外网访问」是同一个开关），地址要带 :{data.port}。</span></span>
+              <Switch checked={v.via_port} onCheckedChange={(c) => setF({ ...v, via_port: !!c })} />
+            </label>
+          </div>
+          {data.names.length > 0 && (
             <div className="text-xs">
               {data.cert_busy ? <span className="text-muted-foreground">正在申请证书（通常 1–2 分钟）…</span>
-                : data.cert_expires ? <span className="text-success">证书有效期至 {datetime(data.cert_expires).slice(0, 10)}，可以打开 <a className="underline" href={url(data.public)}>{url(data.public)}</a></span>
+                : data.cert_expires ? <span className="text-success">证书有效期至 {datetime(data.cert_expires).slice(0, 10)}</span>
                 : data.cert_error ? <span className="text-destructive">证书申请失败：{data.cert_error}</span>
                 : <span className="text-muted-foreground">还没有证书</span>}
             </div>
           )}
           <div className="flex gap-2">
-            <Button size="sm" disabled={busy || !v.public} onClick={() => save()}>保存并申请证书</Button>
-            {data.public && <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(true)}>清除</Button>}
+            <Button size="sm" disabled={busy} onClick={save}>{busy && <Loader2 className="animate-spin" />}保存</Button>
           </div>
         </div>
       </div>

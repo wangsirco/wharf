@@ -29,20 +29,33 @@ func TestPresenceAlerts(t *testing.T) {
 		{ts: 1000, mac: "aa:00:00:00:00:01", ip: "192.168.1.5", kind: "left"},
 		{ts: 1000, mac: "aa:00:00:00:00:02", ip: "192.168.1.6", kind: "left"}, // not watched
 	}
-	a.presenceAlerts(evs)
-	if len(sent) != 1 || !strings.Contains(sent[0], "设备离开：") || !strings.Contains(sent[0], "IP 192.168.1.5 · MAC aa:00:00:00:00:01") ||
-		!strings.Contains(sent[0], "离开时间：") || !strings.Contains(sent[0], "🕒 ") {
+	a.sendPresence(evs)
+	if len(sent) != 1 || !strings.HasPrefix(sent[0], "🚪 ") || !strings.Contains(sent[0], "离开了 · ") || !strings.Contains(sent[0], "🌐 192.168.1.5 · aa:00:00:00:00:01") ||
+		!strings.Contains(sent[0], " 离开（之后 ") || !strings.Contains(sent[0], "🕒 ") || strings.Count(sent[0], "**") != 2 {
 		t.Fatalf("watched only: %q", sent)
 	}
 
 	// every device, only "back", several at once -> one grouped message
 	sent = nil
 	_ = a.setSetting("alerts.rules", `{"device_left":false,"device_back":true,"presence_all":true,"presence_watch":[]}`)
-	a.presenceAlerts(append(evs,
+	a.sendPresence(append(evs,
 		presenceEv{ts: 5000, mac: "aa:00:00:00:00:03", ip: "192.168.1.7", kind: "back", away: 3600},
 		presenceEv{ts: 5000, mac: "aa:00:00:00:00:04", ip: "192.168.1.8", kind: "back"}))
-	if len(sent) != 1 || !strings.Contains(sent[0], "2 台设备回来|") || !strings.Contains(sent[0], "离开了 1 小时") || strings.Count(sent[0], "• ") != 2 {
+	if len(sent) != 1 || !strings.HasPrefix(sent[0], "🏠 2 台设备回来 · ") || !strings.Contains(sent[0], "离开了 1 小时") || strings.Count(sent[0], "**") != 4 {
 		t.Fatalf("grouped: %q", sent)
+	}
+}
+
+// Events a few minutes apart become one message; nothing goes out before things settle.
+func TestPresenceBatching(t *testing.T) {
+	if presenceQuiet >= presenceMax {
+		t.Fatal("quiet window must be shorter than the cap")
+	}
+	if got := tgHTML("**A & B** <x>"); got != "<b>A &amp; B</b> &lt;x&gt;" {
+		t.Fatalf("tgHTML %q", got)
+	}
+	if plainBold("🏠 **Alex** 回来了") != "🏠 Alex 回来了" {
+		t.Fatal("plainBold")
 	}
 }
 

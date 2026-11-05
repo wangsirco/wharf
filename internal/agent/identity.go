@@ -564,3 +564,39 @@ func RunIdentity() {
 		saveFingerprints()
 	}
 }
+
+// SetPanelWAN opens (or closes) the panel's own port on the WAN: the same rule and uci
+// option as LuCI's "allow access from the internet" switch (owp.panel.open_wan), so the
+// init script keeps them as set.
+func SetPanelWAN(on bool) error {
+	want := map[bool]string{true: "1", false: "0"}[on]
+	if uciGetOption("owp", "panel", "open_wan") != want {
+		if _, err := run(10*time.Second, "uci", "set", "owp.panel.open_wan="+want); err != nil {
+			return err
+		}
+		if _, err := run(10*time.Second, "uci", "commit", "owp"); err != nil {
+			return err
+		}
+	}
+	port := uciGetOption("owp", "panel", "port")
+	if _, err := strconv.Atoi(port); err != nil {
+		port = "7080"
+	}
+	all, err := uciGetConfig("firewall")
+	if err != nil {
+		return err
+	}
+	cur, ok := all["owp_panel"]
+	switch {
+	case !on && ok:
+		_, err = Apply([]Change{{Op: "delete", Config: "firewall", Section: "owp_panel"}})
+	case on && (!ok || cur["dest_port"] != port || cur["src"] != "wan"):
+		ch := []Change{{Op: "add", Config: "firewall", Type: "rule", Name: "owp_panel",
+			Values: map[string]any{"name": "owp_panel", "src": "wan", "proto": "tcp", "dest_port": port, "target": "ACCEPT"}}}
+		if ok {
+			ch = append([]Change{{Op: "delete", Config: "firewall", Section: "owp_panel"}}, ch...)
+		}
+		_, err = Apply(ch)
+	}
+	return err
+}

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
-interface Source { mode: 'auto' | 'iface' | 'api'; iface: string; apis: string[] | null; target?: string }
+interface Source { mode: 'auto' | 'iface' | 'api'; iface: string; apis: string[] | null; target?: string; check_min?: number }
 interface Entry {
   id: number; name: string; enabled: boolean; provider: string; creds: Record<string, string>; domain: string; rtype: 'A' | 'AAAA' | 'CNAME'
   source: Source; interval_min: number; on_change: boolean; ttl: number; proxied: boolean
@@ -53,7 +53,8 @@ export default function DDNSPage() {
         <Button size="sm" disabled={!data} onClick={() => setEdit({ ...blank, creds: {}, source: { ...blank.source, apis: [] } })}><Plus /> 添加域名</Button>
       </PageHeader>
       {error && <div className="mb-4"><ErrorBox>{error}</ErrorBox></div>}
-      <Section title="域名">
+      <CloudflareAccount onAdded={reload} />
+      <Section title="域名" className="mt-4">
         {!data?.items.length ? <Empty>{data ? '还没有。添加一个域名，比如 home.example.com，让它始终指向家里。' : '加载中…'}</Empty> : (
           <div className="divide-y">
             {data.items.map((e) => (
@@ -68,7 +69,7 @@ export default function DDNSPage() {
                     {e.rtype === 'CNAME'
                       ? <>指向 <span className="font-mono">{e.source.target}</span>{e.last_ok ? ` · ${ago(e.last_ok)}核对` : ' · 还没有写入'}</>
                       : <>{e.last_ip ? <>当前 <span className="font-mono">{e.last_ip}</span> · {ago(e.last_ok)}更新</> : '还没有更新过'}
-                    {' · '}{[e.on_change && 'IP 变化时', e.interval_min > 0 && `每 ${e.interval_min} 分钟`].filter(Boolean).join(' + ')}
+                    {' · '}{scheduleText(e)}
                     {e.source.mode !== 'api' && e.source.iface ? ` · 接口 ${e.source.iface}` : ''}</>}
                   </div>
                   {e.last_err && <div className="truncate text-xs text-destructive">{e.last_err}</div>}
@@ -127,9 +128,10 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
         {p && (
           <div className="grid gap-3 rounded-xl border p-4">
             <p className="text-xs text-muted-foreground">{p.help}</p>
+            {v.provider === 'cloudflare' && <p className="text-xs text-muted-foreground">已连接 Cloudflare 账户时 API Token 可以留空，自动使用账户的令牌。</p>}
             {p.fields.map((f, i) => (
               <Field key={f} label={p.labels[i]}>
-                <Input value={v.creds[f] ?? ''} onChange={(e) => set({ creds: { ...v.creds, [f]: e.target.value } })}
+                <Input value={v.creds[f] === '@account' ? '' : v.creds[f] ?? ''} placeholder={v.creds[f] === '@account' ? '使用 Cloudflare 账户' : undefined} onChange={(e) => set({ creds: { ...v.creds, [f]: e.target.value } })}
                   type={/secret|password|token|key/.test(f) && !(v.creds[f] ?? '').startsWith('••') ? 'password' : 'text'} className="font-mono" autoComplete="off" />
               </Field>
             ))}
@@ -205,16 +207,8 @@ function Editor({ value: v, onChange, data, onSaved }: { value: Form | null; onC
 
         <div className="grid gap-3 rounded-xl border p-4">
           <div className="text-sm font-medium">什么时候更新（可以都选）</div>
-          <label className="flex items-center gap-2 text-sm"><Switch checked={v.on_change} onCheckedChange={(c) => set({ on_change: c })} />IP 变化时立即更新<span className="text-xs text-muted-foreground">（接口每分钟看一次，公网服务每 5 分钟问一次）</span></label>
-          <Field label="定时强制更新">
-            <div className="flex flex-wrap gap-1.5">
-              {[0, 5, 10, 30, 60, 360, 1440].map((n) => (
-                <button key={n} type="button" onClick={() => set({ interval_min: n })} className={cn('rounded-md border px-2.5 py-1 text-xs', v.interval_min === n ? 'border-primary bg-accent' : 'text-muted-foreground hover:bg-muted')}>
-                  {n === 0 ? '不定时' : n < 60 ? `${n} 分钟` : n < 1440 ? `${n / 60} 小时` : '每天'}
-                </button>
-              ))}
-            </div>
-          </Field>
+          <Schedule check={v.on_change ? (v.source.check_min || 0) : -1} force={v.interval_min}
+            onChange={(check, force) => set({ on_change: check >= 0, interval_min: force, source: { ...v.source, check_min: Math.max(check, 0) } })} custom />
         </div></>}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="TTL（秒）" hint="阿里云 / DNSPod 免费版最低 600"><Input value={v.ttl} inputMode="numeric" onChange={(e) => set({ ttl: Number(e.target.value.replace(/\D/g, '')) || 0 })} /></Field>
@@ -247,5 +241,166 @@ function LogPanel({ entry, onClose }: { entry: Entry | null; onClose: () => void
         </div>
       )}
     </HalfPanel>
+  )
+}
+
+// ---- schedule presets ----
+
+const CHECKS: [number, string][] = [[1, '每 1 分钟'], [5, '每 5 分钟'], [10, '每 10 分钟'], [30, '每 30 分钟']]
+const FORCES: [number, string][] = [[0, '不强制'], [360, '每 6 小时'], [720, '每 12 小时'], [1440, '每天'], [10080, '每周']]
+const PLANS: { label: string; desc: string; check: number; force: number }[] = [
+  { label: '推荐', desc: '每 5 分钟看一次 IP，变了就改；每天再强制写一次兜底', check: 5, force: 1440 },
+  { label: '实时', desc: '每分钟看一次，适合经常换 IP 的拨号宽带', check: 1, force: 720 },
+  { label: '省事', desc: '每 30 分钟看一次，每周兜底', check: 30, force: 10080 },
+  { label: '只定时', desc: '不检测变化，每 10 分钟直接写一次', check: -1, force: 10 },
+]
+
+function label(n: number) {
+  return n <= 0 ? '不强制' : n < 60 ? `每 ${n} 分钟` : n < 1440 ? `每 ${n / 60} 小时` : n === 1440 ? '每天' : n === 10080 ? '每周' : `每 ${Math.round(n / 1440)} 天`
+}
+
+export function scheduleText(e: { on_change: boolean; interval_min: number; source: { check_min?: number; mode: string } }) {
+  const parts: string[] = []
+  if (e.on_change) parts.push(`IP 变化时（${e.source.check_min ? `每 ${e.source.check_min} 分钟检查` : e.source.mode === 'api' ? '每 5 分钟检查' : '每分钟检查'}）`)
+  if (e.interval_min > 0) parts.push(`${label(e.interval_min)}强制`)
+  return parts.join(' + ')
+}
+
+// Schedule: check = minutes between looks for a new address (-1 = do not watch, 0 = default);
+// force = minutes between forced writes (0 = never).
+function Schedule({ check, force, onChange, custom }: { check: number; force: number; onChange: (check: number, force: number) => void; custom?: boolean }) {
+  const chip = (on: boolean) => cn('rounded-md border px-2.5 py-1 text-xs', on ? 'border-primary bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted')
+  return (
+    <div className="grid gap-3">
+      <Field label="快速方案">
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {PLANS.map((p) => (
+            <button key={p.label} type="button" onClick={() => onChange(p.check, p.force)}
+              className={cn('rounded-lg border px-3 py-2 text-left', check === p.check && force === p.force ? 'border-primary bg-accent' : 'hover:bg-muted')}>
+              <div className="text-sm font-medium">{p.label}</div><div className="text-xs text-muted-foreground">{p.desc}</div>
+            </button>
+          ))}
+        </div>
+      </Field>
+      {custom && (
+        <>
+          <Field label="多久检查一次 IP（变了立即更新）">
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" className={chip(check < 0)} onClick={() => onChange(-1, force || 60)}>不检查</button>
+              {CHECKS.map(([n, l]) => <button key={n} type="button" className={chip(check === n || (n === 1 && check === 0))} onClick={() => onChange(n, force)}>{l}</button>)}
+            </div>
+          </Field>
+          <Field label="兜底：定时强制更新" hint="即使 IP 没变也重新写一次，防止记录被别处改掉或服务商丢了更新">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {FORCES.map(([n, l]) => <button key={n} type="button" className={chip(force === n)} onClick={() => onChange(check, n)}>{l}</button>)}
+              <Input className="h-7 w-24 text-xs" inputMode="numeric" value={force} onChange={(e) => onChange(check, Number(e.target.value.replace(/\D/g, '')) || 0)} />
+              <span className="text-xs text-muted-foreground">分钟（自定义，最长 10080）</span>
+            </div>
+          </Field>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---- Cloudflare account ----
+
+interface CFState { connected: boolean; token: string; create_url: string; zones: { id: string; name: string }[]; error?: string }
+interface CFRecord { id: string; type: string; name: string; content: string; proxied: boolean }
+
+function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
+  const { data, reload } = useApi<CFState>('/cloudflare')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [zone, setZone] = useState('')
+  const [sub, setSub] = useState('')
+  const [rtype, setRtype] = useState<'A' | 'AAAA'>('A')
+  const [plan, setPlan] = useState({ check: 5, force: 1440 })
+  const { data: records, reload: reloadRecs } = useApi<CFRecord[]>(zone ? `/cloudflare/records?zone=${zone}` : null)
+  const { confirm, dialog } = useConfirm()
+  if (!data) return null
+  const zoneName = data.zones.find((z) => z.id === zone)?.name ?? ''
+  const connect = async (t: string) => {
+    setBusy(true)
+    try { await post('/cloudflare', { token: t }); setToken(''); toast.success(t ? '已连接 Cloudflare 账户' : '已断开'); reload() }
+    catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+  }
+  const add = async (domain: string, type: string) => {
+    setBusy(true)
+    try {
+      await post('/ddns', { name: domain, enabled: true, provider: 'cloudflare', creds: { token: '' }, domain, rtype: type,
+        source: { mode: 'auto', iface: type === 'AAAA' ? 'wan6' : 'wan', apis: [], check_min: Math.max(plan.check, 0) },
+        interval_min: plan.force, on_change: plan.check >= 0, ttl: 300, proxied: false })
+      toast.success(`已添加 ${domain}，马上更新一次`); setSub(''); onAdded(); reloadRecs()
+    } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+  }
+  const takeOver = async (r: CFRecord) => {
+    if (r.type === 'CNAME') { toast.error('这是 CNAME 记录：要改成跟随家里 IP，请先在 Cloudflare 删掉它，再在这里用同名新建'); return }
+    if (!(await confirm(`接管 ${r.name}？`, `它现在指向 ${r.content}${r.proxied ? '（开着橙色云）' : ''}。接管后由面板按家里的公网 IP 自动更新${r.proxied ? '，并关闭橙色云' : ''}。`, { ok: '接管' }))) return
+    await add(r.name, r.type)
+  }
+  return (
+    <Section title="Cloudflare 账户" desc="连接一次，就能直接选域名、新建或接管已有的解析记录，面板域名和证书也会用它。">
+      <div className="grid gap-4 p-4">
+        {!data.connected ? (
+          <div className="grid gap-3">
+            <ol className="list-decimal space-y-0.5 pl-5 text-sm">
+              <li><a className="text-primary underline" href={data.create_url} target="_blank" rel="noreferrer">打开 Cloudflare 创建令牌</a>（权限已经选好：读取区域、编辑 DNS；登录后滚到最下面点「继续」→「创建令牌」）</li>
+              <li>复制生成的令牌，粘贴到下面</li>
+            </ol>
+            <div className="flex gap-2">
+              <Input type="password" autoComplete="off" placeholder="Cloudflare API 令牌" value={token} onChange={(e) => setToken(e.target.value.trim())} />
+              <Button disabled={busy || !token} onClick={() => connect(token)}>{busy && <Loader2 className="animate-spin" />}连接</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Cloudflare 暂不支持让家用设备直接「用账号登录」（OAuth 需要固定的回调网址），所以用这个一键创建的令牌代替：只能读域名、改 DNS，随时可以在 Cloudflare 撤销。</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Dot tone={data.error ? 'bad' : 'ok'} />{data.error ? <span className="text-destructive">{data.error}</span> : <span>已连接 · {data.zones.length} 个域名：</span>}
+              {data.zones.map((z) => <Pill key={z.id}>{z.name}</Pill>)}
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => connect('')}>断开</Button>
+            </div>
+            <div className="grid gap-3 rounded-xl border p-4">
+              <div className="text-sm font-medium">快速添加</div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                <Field label="主域名">
+                  <select className="h-9 rounded-md border bg-background px-2 text-sm" value={zone} onChange={(e) => setZone(e.target.value)}>
+                    <option value="">选择…</option>
+                    {data.zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="子域名" hint={zoneName ? `将更新 ${sub ? sub + '.' : ''}${zoneName}` : '留空 = 主域名本身'}>
+                  <Input value={sub} placeholder="home" onChange={(e) => setSub(e.target.value.trim().toLowerCase())} />
+                </Field>
+                <Field label="类型">
+                  <div className="flex gap-1">
+                    {(['A', 'AAAA'] as const).map((t) => <button key={t} type="button" onClick={() => setRtype(t)} className={cn('h-9 rounded-md border px-3 text-xs', rtype === t ? 'border-primary bg-accent' : 'text-muted-foreground')}>{t === 'A' ? 'IPv4' : 'IPv6'}</button>)}
+                  </div>
+                </Field>
+              </div>
+              <Schedule check={plan.check} force={plan.force} onChange={(check, force) => setPlan({ check, force })} />
+              <div><Button disabled={busy || !zone} onClick={() => add(sub ? `${sub}.${zoneName}` : zoneName, rtype)}><Plus /> 添加并更新</Button></div>
+              {zone && (
+                <div className="grid gap-1">
+                  <div className="text-xs text-muted-foreground">{zoneName} 现有的解析记录（可以直接接管）</div>
+                  <div className="max-h-56 divide-y overflow-y-auto rounded-lg border">
+                    {(records ?? []).map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                        <span className="min-w-0 flex-1 truncate font-mono">{r.name}</span><Pill>{r.type}</Pill>
+                        <span className="hidden truncate font-mono text-xs text-muted-foreground sm:inline">{r.content}{r.proxied ? ' · 橙色云' : ''}</span>
+                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => takeOver(r)}>接管</Button>
+                      </div>
+                    ))}
+                    {records && !records.length && <Empty>没有 A / AAAA / CNAME 记录</Empty>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      {dialog}
+    </Section>
   )
 }
