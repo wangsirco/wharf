@@ -76,6 +76,9 @@ func NewApp(cfg Config, db *sql.DB, web fs.FS) *App {
 
 // clientIP returns the peer address, or the forwarded address when the peer is a trusted proxy.
 func (a *App) clientIP(r *http.Request) string {
+	if v := a.cloudflareVisitor(r); v != "" { // a proxied panel name: Cloudflare says who (origincert.go)
+		return v
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr

@@ -386,12 +386,18 @@ func (a *App) renewPublicCert(force bool) {
 func (a *App) panelNamesLoop() {
 	time.Sleep(10 * time.Second)
 	a.loadPublicCert()
+	a.loadOriginCert()
 	for i := 0; ; i++ {
 		if err := a.syncPanelNames(); err != nil {
 			log.Printf("panel names: %v", err)
 		}
 		if i%96 == 0 { // daily (every 15 minutes otherwise)
 			a.renewPublicCert(false)
+			if len(a.proxiedNames()) > 0 { // Cloudflare's ranges may have changed
+				if err := a.applyProxiedNames(); err != nil {
+					log.Printf("panel: cloudflare proxy: %v", err)
+				}
+			}
 		}
 		time.Sleep(15 * time.Minute)
 	}
@@ -452,11 +458,14 @@ func (a *App) panelNamesState(withDNS bool) map[string]any {
 	ext, _ := a.proxyExt()
 	pubCert.RLock()
 	defer pubCert.RUnlock()
-	out := map[string]any{"local": a.localPanelName(), "port": port, "names": st,
+	out := a.originState()
+	for k, v := range map[string]any{"local": a.localPanelName(), "port": port, "names": st,
 		"via_443": a.setting("panel.via_443") == "1", "via_port": a.setting("panel.via_port") == "1",
 		"front_ready": ext.Installed, "wan_ips": wanIPs,
 		"token_set": a.setting("panel.cf_token") != "", "account": a.setting("cloudflare.token") != "",
-		"cert_busy": pubCert.busy, "cert_error": pubCert.err}
+		"cert_busy": pubCert.busy, "cert_error": pubCert.err} {
+		out[k] = v
+	}
 	if pubCert.cert != nil {
 		out["cert_expires"] = pubCert.exp.Unix()
 	}
@@ -471,6 +480,7 @@ func (a *App) handlePanelNamesSave(w http.ResponseWriter, r *http.Request) {
 		Token   string   `json:"token"`
 		Via443  bool     `json:"via_443"`
 		ViaPort bool     `json:"via_port"`
+		Proxied []string `json:"proxied"` // names behind Cloudflare's orange cloud
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
@@ -521,14 +531,24 @@ func (a *App) handlePanelNamesSave(w http.ResponseWriter, r *http.Request) {
 		req.Via443, req.ViaPort = false, false
 		_ = a.setSetting("panel.cf_token", "")
 	}
+	var prox []string
+	for _, n := range req.Proxied {
+		if slices.Contains(ns, n) {
+			prox = append(prox, n)
+		}
+	}
+	if len(prox) > 0 && a.cfTokenFor(prox[0]) == "" {
+		jsonErr(w, 400, "走 Cloudflare 代理需要先连接 Cloudflare 账户（或填写令牌）")
+		return
+	}
+	_ = a.setSetting("panel.proxied", mustJSON(prox))
 	_ = a.setSetting("panel.via_443", boolStr(req.Via443))
 	_ = a.setSetting("panel.via_port", boolStr(req.ViaPort))
 	if err := a.syncPanelNames(); err != nil {
 		log.Printf("panel names: %v", err)
 	}
-	if err := a.agent.Do("POST", "/v1/panel/wan", map[string]bool{"on": req.ViaPort}, nil); err != nil {
-		jsonErr(w, 500, "开放面板端口失败："+err.Error())
-		return
+	if err := a.applyProxiedNames(); err != nil {
+		log.Printf("panel: cloudflare proxy: %v", err) // shown in the state as origin_error
 	}
 	if ext, _ := a.proxyExt(); ext.Installed {
 		if err := a.reapplyProxy(); err != nil {

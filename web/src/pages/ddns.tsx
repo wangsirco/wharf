@@ -345,14 +345,14 @@ function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
         {!data.connected ? (
           <div className="grid gap-3">
             <ol className="list-decimal space-y-0.5 pl-5 text-sm">
-              <li><a className="text-primary underline" href={data.create_url} target="_blank" rel="noreferrer">打开 Cloudflare 创建令牌</a>（权限已经选好：读取区域、编辑 DNS；登录后滚到最下面点「继续」→「创建令牌」）</li>
+              <li><a className="text-primary underline" href={data.create_url} target="_blank" rel="noreferrer">打开 Cloudflare 创建令牌</a>（权限已经选好：读取区域、编辑 DNS、SSL 和证书；要让面板域名走橙色云，再手动加一行「区域 → Origin Rules → 编辑」；然后滚到最下面点「继续」→「创建令牌」）</li>
               <li>复制生成的令牌，粘贴到下面</li>
             </ol>
             <div className="flex gap-2">
               <Input type="password" autoComplete="off" placeholder="Cloudflare API 令牌" value={token} onChange={(e) => setToken(e.target.value.trim())} />
               <Button disabled={busy || !token} onClick={() => connect(token)}>{busy && <Loader2 className="animate-spin" />}连接</Button>
             </div>
-            <p className="text-xs text-muted-foreground">Cloudflare 暂不支持让家用设备直接「用账号登录」（OAuth 需要固定的回调网址），所以用这个一键创建的令牌代替：只能读域名、改 DNS，随时可以在 Cloudflare 撤销。</p>
+            <p className="text-xs text-muted-foreground">Cloudflare 暂不支持让家用设备直接「用账号登录」（OAuth 需要固定的回调网址），所以用这个一键创建的令牌代替：只能读域名、改 DNS 和证书，随时可以在 Cloudflare 撤销。</p>
           </div>
         ) : (
           <>

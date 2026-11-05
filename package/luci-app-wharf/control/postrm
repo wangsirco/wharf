@@ -3,7 +3,7 @@
 # opkg runs postrm on upgrades too; only clean up when the package is really gone
 [ -x /usr/bin/owp-agent ] && exit 0
 changed=0
-for r in owp_panel owp_agent; do
+for r in owp_panel owp_panel_cf owp_agent; do
 	uci -q get firewall.$r >/dev/null && uci delete firewall.$r && changed=1
 done
 # proxy extension: its service, downloaded core and data, and the WAN redirects of its nodes

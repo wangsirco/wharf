@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -590,7 +591,7 @@ func SetPanelWAN(on bool) error {
 	switch {
 	case !on && ok:
 		_, err = Apply([]Change{{Op: "delete", Config: "firewall", Section: "owp_panel"}})
-	case on && (!ok || cur["dest_port"] != port || cur["src"] != "wan"):
+	case on && (!ok || secStr(cur, "dest_port") != port || secStr(cur, "src") != "wan"):
 		ch := []Change{{Op: "add", Config: "firewall", Type: "rule", Name: "owp_panel",
 			Values: map[string]any{"name": "owp_panel", "src": "wan", "proto": "tcp", "dest_port": port, "target": "ACCEPT"}}}
 		if ok {
@@ -598,5 +599,38 @@ func SetPanelWAN(on bool) error {
 		}
 		_, err = Apply(ch)
 	}
+	return err
+}
+
+// SetPanelCF lets only Cloudflare reach the panel's port (rule owp_panel_cf, empty = none):
+// for panel names behind Cloudflare's proxy, whose Origin Rule sends them to this port.
+func SetPanelCF(cidrs []string) error {
+	var v4 []string
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Addr().Is4() {
+			v4 = append(v4, p.String())
+		}
+	}
+	port := uciGetOption("owp", "panel", "port")
+	if _, err := strconv.Atoi(port); err != nil {
+		port = "7080"
+	}
+	all, err := uciGetConfig("firewall")
+	if err != nil {
+		return err
+	}
+	_, ok := all["owp_panel_cf"]
+	var ch []Change
+	if ok {
+		ch = append(ch, Change{Op: "delete", Config: "firewall", Section: "owp_panel_cf"})
+	}
+	if len(v4) > 0 {
+		ch = append(ch, Change{Op: "add", Config: "firewall", Type: "rule", Name: "owp_panel_cf",
+			Values: map[string]any{"name": "owp_panel_cf", "src": "wan", "proto": "tcp", "dest_port": port, "family": "ipv4", "src_ip": v4, "target": "ACCEPT"}})
+	}
+	if len(ch) == 0 || (ok && len(v4) > 0 && slices.Equal(secList(all["owp_panel_cf"], "src_ip"), v4) && secStr(all["owp_panel_cf"], "dest_port") == port) {
+		return nil
+	}
+	_, err = Apply(ch)
 	return err
 }

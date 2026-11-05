@@ -99,10 +99,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 202, map[string]bool{"ok": true})
 	case r.Method == "POST" && r.URL.Path == "/v1/panel/wan":
 		var req struct {
-			On bool `json:"on"`
+			On bool     `json:"on"`
+			CF []string `json:"cf"` // Cloudflare ranges allowed in when only they may reach the panel
 		}
-		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req)
-		if err := SetPanelWAN(req.On); err != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req)
+		err := SetPanelWAN(req.On)
+		if err == nil {
+			err = SetPanelCF(req.CF)
+		}
+		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
 		}

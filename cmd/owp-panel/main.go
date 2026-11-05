@@ -133,7 +133,10 @@ func main() {
 		go ca.Watch(certNames, log.Printf)
 		app.CA = ca
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			if c := app.PublicCertificate(h); c != nil { // the public name's Let's Encrypt certificate
+			if c := app.OriginCertificate(h); c != nil { // Cloudflare itself, for a proxied name
+				return c, nil
+			}
+			if c := app.PublicCertificate(h); c != nil { // the public names' Let's Encrypt certificate
 				return c, nil
 			}
 			return ca.GetCertificate(h)

@@ -389,6 +389,7 @@ Wharf 的部分功能建立在 OpenWrt 官方软件包之上。**这些包都不
   - 路由器在家里把它们解析到面板；一张 Let's Encrypt 证书覆盖所有公网域名，通过 Cloudflare DNS 验证申请（用 Cloudflare 账户或单独的令牌），自动续期；
   - 每个域名显示公网解析状态；还没指向家里时，可以一键「用 DDNS 维护」（在 Cloudflare 账户下建一条 A 记录，每 5 分钟检查、每天兜底）；
   - **从外网怎么进来（可以都开）**：「通过 443」复用代理扩展的 443 分流器，按域名交给面板，地址不带端口，1Panel 网站和代理节点不受影响；分流器用 PROXY 协议把访客的真实 IP 交给面板，面板访问控制照常生效（域名要保持「仅 DNS」灰色云）。「开放面板端口」在 WAN 放行面板端口（与 LuCI「允许外网访问」同一个开关），地址带 `:7080`。
+  - **走 Cloudflare 代理（橙色云）**：每个公网域名可以单独打开。面板会把这条记录切到橙色云，并在 Cloudflare 建一条 Origin Rule（描述以 `wharf panel` 开头，其他规则不动），把回源端口改到面板端口；WAN 上的面板端口只对 Cloudflare 的 IP 开放（防火墙规则 `owp_panel_cf`），地址仍是 `https://域名`。Cloudflare 连回家时用 **Cloudflare 源服务器证书**：可以粘贴你网站正在用的那张（例如 `*.example.com`），也可以让面板通过 API 申请一张 15 年的；家里设备直接访问同一个域名时（路由器直接解析到面板）用 Let's Encrypt 证书。只有来自 Cloudflare IP 的连接才会采信 `CF-Connecting-IP`，所以访问控制看到的仍是真实访客。令牌需要「SSL 和证书 → 编辑」（创建链接已预选）和「Origin Rules → 编辑」（需要手动加上）。443 上来自 Cloudflare 的访问照旧直达原来的网站转发，不受影响。
   - 公网访问受「面板访问控制」约束，开放前请确认公网规则（例如只允许你所在的国家）。
 - **敏感操作二次确认**：勾选哪些操作需要超级管理员批准（如开关插件、重启、端口转发、设备管控……）。
 - **日志保留与判定**
@@ -581,7 +582,7 @@ Wharf 只在你使用对应功能时才做改动，并尽量使用标准配置�
 | DNS 查询日志 | dnsmasq `logqueries` + `logfacility=/var/log/owp-dns.log` | 启动 agent（首次） | 恢复 |
 | DHCP 指纹 | dnsmasq `logdhcp`（写入同一个日志文件）；结果在数据目录 `fingerprints.json` | 「设备识别」开启时（默认开） | 恢复 |
 | 面板域名解析 | `/etc/config/dhcp` 的 domain 段 `owpn_local`（wharf.lan）/ `owpn_p0`… | 启动面板 / 设置公网域名 | 删除 |
-| 面板公网端口 | firewall rule `owp_panel` + `owp.panel.open_wan` | 在「面板域名」或 LuCI 里开启时 | 删除 |
+| 面板公网端口 | firewall rule `owp_panel` + `owp.panel.open_wan`；只对 Cloudflare 开放时 `owp_panel_cf` | 在「面板域名」或 LuCI 里开启时 | 删除 |
 | 面板 / agent 的 WAN 放行 | firewall rule `owp_panel` / `owp_agent` | 仅当你在 LuCI 勾选「允许外网访问」 | 删除 |
 | 静态绑定、自定义解析 | `/etc/config/dhcp`（host / domain 段） | 使用时 | 保留 |
 | 定时重启 | root crontab（带 `# owp-reboot` 标记） | 设置时 | 保留（可在面板关闭） |

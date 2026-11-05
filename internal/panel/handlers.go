@@ -150,6 +150,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("GET /api/panel/names", a.super(a.handlePanelNames))
 	m.HandleFunc("POST /api/panel/names", a.super(a.handlePanelNamesSave))
 	m.HandleFunc("POST /api/panel/names/ddns", a.super(a.handlePanelNameDDNS))
+	m.HandleFunc("POST /api/panel/origin", a.super(a.handleOriginCert))
 	m.HandleFunc("GET /api/access/me", a.super(a.handleAccessMe))
 	m.HandleFunc("PUT /api/settings", a.super(a.handleSettingsUpdate))
 	m.HandleFunc("GET /api/agent/status", a.super(a.handleAgentStatus))

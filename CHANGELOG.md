@@ -4,6 +4,7 @@
 
 - Cloudflare account for DDNS: one-click token page with the permissions chosen, then pick a domain, add or take over records; plans plus custom check / forced-refresh intervals (up to 7 days) · DDNS 连接 Cloudflare 账户，快速方案与自定义
 - Public panel access on several names: through the 443 SNI front (real visitor IP via PROXY protocol, access control applies) and / or the panel port; one Let's Encrypt certificate for all names; one-click DDNS for a name · 面板公网访问（443 或独立端口，多个域名）
+- Panel names behind Cloudflare's orange cloud: an Origin Rule sends them to the panel port (open to Cloudflare only), Cloudflare gets the origin certificate (pasted or a 15-year one from the API), home devices the Let's Encrypt one · 面板域名可走 Cloudflare 橙色云，用源服务器证书
 - Alerts: icon per kind, device names in bold, one block per device; devices arriving together within a few minutes come as one message · 告警排版与合并
 - Fix: the sidebar scrolls on its own · 修复侧边栏不能单独滚动
 

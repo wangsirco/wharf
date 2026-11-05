@@ -19,9 +19,11 @@ import (
 // cannot offer; the token page opens pre-filled instead (cfTokenURL), one click away.
 
 // cfTokenURL opens Cloudflare's "create token" page with the right permissions chosen:
-// read the zones, edit their DNS records.
+// read the zones, edit their DNS records, and create origin certificates. (Origin Rules,
+// for panel names behind the orange cloud, cannot be pre-filled: added by hand.)
 const cfTokenURL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=" +
-	"%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D" +
+	"%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%2C" +
+	"%7B%22key%22%3A%22ssl_and_certificates%22%2C%22type%22%3A%22edit%22%7D%5D" +
 	"&accountId=%2A&zoneId=all&name=Wharf"
 
 // cfAccountToken is the stored account token (set by the App so DDNS can use it).
