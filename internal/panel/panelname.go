@@ -112,12 +112,36 @@ func (a *App) passkeyHosts() []string {
 	return append([]string{a.localPanelName()}, a.publicNames()...)
 }
 
-// panelFrontRoute: what the 443 front should send to the panel (nil = nothing).
-func (a *App) panelFrontRoute() []string {
-	if a.setting("panel.via_443") != "1" {
+type panelRoute struct {
+	names   []string
+	lanOnly bool
+}
+
+// panelFrontRoute: what the 443 front sends to the panel. Devices at home always get
+// there (the router answers the names with its WAN address, which loops back into the
+// front); the internet only when "through 443" is on.
+func (a *App) panelFrontRoute() *panelRoute {
+	ns := a.publicNames()
+	if len(ns) == 0 {
 		return nil
 	}
-	return a.publicNames()
+	return &panelRoute{names: ns, lanOnly: a.setting("panel.via_443") != "1"}
+}
+
+// homeAddrFor: what dnsmasq answers a public name with at home. With the 443 front
+// running, the WAN address (LAN connections to it loop back into the front, which
+// passes the name to the panel), so https://name works without a port; otherwise the
+// LAN address, where the panel is reached at https://name:port.
+func (a *App) homeAddrFor() string {
+	_, lan := a.lanInfo()
+	if ext, err := a.proxyExt(); err == nil && ext.Installed && ext.Running["front"] {
+		for _, w := range a.wans() {
+			if w.Up && w.IPv4 != "" {
+				return w.IPv4
+			}
+		}
+	}
+	return lan
 }
 
 // syncPanelNames keeps the dnsmasq records for the panel's names.
@@ -134,6 +158,7 @@ func (a *App) syncPanelNames() error {
 	for i, n := range a.publicNames() {
 		want["owpn_p"+strconv.Itoa(i)] = n
 	}
+	home := a.homeAddrFor()
 	var changes []UciChange
 	for sec := range dhcp {
 		if (sec == "owpn_public" || strings.HasPrefix(sec, "owpn_p")) && want[sec] == "" {
@@ -141,12 +166,16 @@ func (a *App) syncPanelNames() error {
 		}
 	}
 	for sec, name := range want {
+		addr := ip
+		if sec != "owpn_local" {
+			addr = home
+		}
 		cur, ok := dhcp[sec]
 		switch {
 		case !ok:
-			changes = append(changes, UciChange{Op: "add", Config: "dhcp", Type: "domain", Name: sec, Values: map[string]any{"name": name, "ip": ip}})
-		case optStr(cur, "name") != name || optStr(cur, "ip") != ip:
-			changes = append(changes, UciChange{Op: "set", Config: "dhcp", Section: sec, Values: map[string]any{"name": name, "ip": ip}})
+			changes = append(changes, UciChange{Op: "add", Config: "dhcp", Type: "domain", Name: sec, Values: map[string]any{"name": name, "ip": addr}})
+		case optStr(cur, "name") != name || optStr(cur, "ip") != addr:
+			changes = append(changes, UciChange{Op: "set", Config: "dhcp", Section: sec, Values: map[string]any{"name": name, "ip": addr}})
 		}
 	}
 	if len(changes) == 0 {

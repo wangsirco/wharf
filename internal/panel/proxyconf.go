@@ -545,12 +545,13 @@ type frontFallback struct {
 }
 
 // acmeOK: the shared port is 443, where Let's Encrypt can validate (TLS-ALPN-01).
-// panelNames: the panel's public names, routed to its loopback listener (panelname.go).
-func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback, acmeOK bool, panelNames []string) (string, bool) {
+// panel: the panel's public names, routed to its loopback listener (panelname.go).
+func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback, acmeOK bool, panel *panelRoute) (string, bool) {
 	type route struct {
 		SNI     []string `json:"sni"`
 		Backend string   `json:"backend"`
 		Proxy   bool     `json:"proxy"`
+		LANOnly bool     `json:"lan_only,omitempty"`
 	}
 	var routes []route
 	var acme []string
@@ -567,8 +568,8 @@ func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontF
 			acme = append(acme, n.Domain)
 		}
 	}
-	if len(panelNames) > 0 { // TLS stays end to end: the panel answers with its own certificate
-		routes = append(routes, route{SNI: panelNames, Backend: fmt.Sprintf("127.0.0.1:%d", panelProxyPort), Proxy: true})
+	if panel != nil && len(panel.names) > 0 { // TLS stays end to end: the panel answers with its own certificate
+		routes = append(routes, route{SNI: panel.names, Backend: fmt.Sprintf("127.0.0.1:%d", panelProxyPort), Proxy: true, LANOnly: panel.lanOnly})
 		need = true
 	}
 	if site.Domain != "" && !slices.Contains(acme, site.Domain) {

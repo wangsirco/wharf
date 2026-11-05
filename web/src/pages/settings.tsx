@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth'
 import { refreshBrand } from '@/lib/brand'
 import { bytes, datetime } from '@/lib/format'
 import { PageHeader } from '@/components/layout'
-import { Dot, Field, Section, useConfirm } from '@/components/common'
+import { Dot, Field, Pill, Section, useConfirm } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -381,12 +381,12 @@ function PanelNames() {
               <div className="text-sm font-medium">公网域名状态</div>
               {data.names.map((n) => ({ ...n, resolves: n.resolves ?? [] })).map((n) => (
                 <div key={n.name} className="rounded-lg border px-3 py-2 text-xs">
-                  <div className="flex items-center gap-2"><Dot tone={n.points ? 'ok' : n.resolves.length ? 'warn' : 'bad'} /><span className="font-mono text-sm">{n.name}</span></div>
+                  <div className="flex items-center gap-2"><Dot tone={n.points || ((data.proxied ?? []).includes(n.name) && n.resolves.length) ? 'ok' : n.resolves.length ? 'warn' : 'bad'} /><span className="font-mono text-sm">{n.name}</span>{(data.proxied ?? []).includes(n.name) && <Pill tone="amber">橙色云</Pill>}</div>
                   <div className="mt-0.5 text-muted-foreground">
-                    {n.points ? `解析正确（${n.resolves.join('、')}）` : n.resolves.length ? `解析到 ${n.resolves.join('、')}，不是家里的公网 IP（${(data.wan_ips ?? []).join('、') || '未知'}）；开了橙色云也会这样` : '公网还解析不到'}
+                    {(data.proxied ?? []).includes(n.name) && n.resolves.length ? '走 Cloudflare 代理（公网解析到 Cloudflare，正常）；家里直接进面板' : n.points ? `解析正确（${n.resolves.join('、')}）` : n.resolves.length ? `解析到 ${n.resolves.join('、')}，不是家里的公网 IP（${(data.wan_ips ?? []).join('、') || '未知'}）；开了橙色云也会这样` : '公网还解析不到'}
                     {n.ddns ? ' · DDNS 维护中' : ''}
                   </div>
-                  {!n.ddns && !n.points && (
+                  {!n.ddns && !n.points && !(data.proxied ?? []).includes(n.name) && (
                     data.account
                       ? <Button size="sm" variant="outline" className="mt-1.5 h-7" onClick={() => ddns(n.name)}>用 DDNS 维护（Cloudflare 账户）</Button>
                       : <div className="mt-1">在「动态域名 DDNS」页连接 Cloudflare 账户后，可以一键让它跟随家里的 IP。</div>
@@ -417,7 +417,7 @@ function PanelNames() {
                   <Switch checked={v.proxied.includes(n)} onCheckedChange={(c) => setF({ ...v, proxied: c ? [...v.proxied, n] : v.proxied.filter((x) => x !== n) })} />
                 </label>
               ))}
-              <p className="text-xs text-muted-foreground">打开后：面板把这条记录切到橙色云，并在 Cloudflare 建一条 Origin Rule，把回源端口改到 {data.port}；WAN 的 {data.port} 只对 Cloudflare 的 IP 开放。地址仍然是 https://域名。Cloudflare 来的连接用源服务器证书，家里直接访问用 Let's Encrypt 证书。令牌需要额外勾选「Origin Rules → 编辑」（创建令牌页面无法预选，需要手动加）。</p>
+              <p className="text-xs text-muted-foreground">打开后：面板把这条记录切到橙色云，并在 Cloudflare 建一条 Origin Rule，把回源端口改到 {data.port}；WAN 的 {data.port} 只对 Cloudflare 的 IP 开放。地址仍然是 https://域名。Cloudflare 来的连接优先用源服务器证书（没有时用 Let's Encrypt 证书），家里直接访问用 Let's Encrypt 证书。令牌需要额外勾选「Origin Rules → 编辑」（创建令牌页面无法预选，需要手动加）。</p>
             </div>
           )}
           <div className="grid gap-2 rounded-lg border p-3">
@@ -451,7 +451,7 @@ function PanelNames() {
                   <span className="text-success">{data.origin_cert.names.join('、')} · 有效期至 {datetime(data.origin_cert.expires).slice(0, 10)}{data.origin_cert.source === 'api' ? ' · 面板申请' : ' · 已上传'}</span>
                   <Button size="sm" variant="ghost" className="h-7" disabled={busy} onClick={() => origin({ remove: true }, '已删除源服务器证书')}>删除</Button>
                 </div>
-              ) : <div className="text-xs text-destructive">还没有：Cloudflare 的「SSL/TLS」用「完全（严格）」时必须有。</div>}
+              ) : <div className="text-xs text-muted-foreground">还没有：现在给 Cloudflare 的是 Let's Encrypt 证书，「完全」和「完全（严格）」都能用。放一张源服务器证书（15 年）就不再依赖 Let's Encrypt 续期。</div>}
               <Button size="sm" variant="outline" className="w-fit" disabled={busy} onClick={() => origin({ create: true }, '已申请 15 年的源服务器证书')}>让面板向 Cloudflare 申请（15 年）</Button>
               <div className="text-xs text-muted-foreground">或者粘贴你网站正在用的那张（例如 *.example.com）：</div>
               <textarea className="min-h-16 rounded-md border bg-background px-2 py-1 font-mono text-[11px]" placeholder="-----BEGIN CERTIFICATE-----" value={pem.cert} onChange={(e) => setPem({ ...pem, cert: e.target.value })} />

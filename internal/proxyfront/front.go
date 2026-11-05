@@ -46,6 +46,7 @@ type Route struct {
 	SNI         []string `json:"sni"`
 	Backend     string   `json:"backend"` // host:port of the Xray inbound
 	Proxy       bool     `json:"proxy"`   // send a PROXY protocol v2 header
+	LANOnly     bool     `json:"lan_only"` // only for clients at home (private addresses); others fall through
 	Transparent bool     `json:"-"`
 }
 
@@ -232,7 +233,7 @@ func (f *front) handle(c net.Conn) {
 		tc.Close()
 		return
 	}
-	if r, ok := f.routes[name]; ok {
+	if r, ok := f.routes[name]; ok && (!r.LANOnly || privateClient(c.RemoteAddr())) {
 		f.pipe(replay, c, r)
 		return
 	}
@@ -323,6 +324,16 @@ func (f *front) pipe(client net.Conn, raw net.Conn, r Route) {
 }
 
 var v2sig = []byte{0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A}
+
+func privateClient(a net.Addr) bool {
+	ta, ok := a.(*net.TCPAddr)
+	if !ok {
+		return false
+	}
+	ip, ok := netip.AddrFromSlice(ta.IP)
+	ip = ip.Unmap()
+	return ok && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast())
+}
 
 // proxyV2 builds a PROXY protocol v2 header for a TCP connection.
 func proxyV2(src, dst net.Addr) []byte {
