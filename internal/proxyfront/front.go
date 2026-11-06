@@ -44,8 +44,8 @@ import (
 
 type Route struct {
 	SNI         []string `json:"sni"`
-	Backend     string   `json:"backend"` // host:port of the Xray inbound
-	Proxy       bool     `json:"proxy"`   // send a PROXY protocol v2 header
+	Backend     string   `json:"backend"`  // host:port of the Xray inbound
+	Proxy       bool     `json:"proxy"`    // send a PROXY protocol v2 header
 	LANOnly     bool     `json:"lan_only"` // only for clients at home (private addresses); others fall through
 	Transparent bool     `json:"-"`
 }

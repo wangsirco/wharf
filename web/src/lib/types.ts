@@ -12,6 +12,7 @@ export interface User {
   created_at: number
   updated_at: number
   last_login_at: number
+  login_mode: 'password' | 'two_step' | 'passkey'
 }
 
 export interface PermDef { key: string; group: string; label: string; desc: string }

@@ -23,7 +23,8 @@ func EnsureSuper(db *sql.DB, cfg Config) error {
 	return err
 }
 
-// ResetSuper sets a new random password for the super admin (creating it if needed).
+// ResetSuper sets a new random password for the super admin (creating it if needed) and
+// lets it sign in with that password again, whatever login mode it had chosen.
 func ResetSuper(db *sql.DB, cfg Config) (string, error) {
 	a := &App{db: db}
 	pw := sign.RandomHex(8)
@@ -39,7 +40,7 @@ func ResetSuper(db *sql.DB, cfg Config) (string, error) {
 	} else if err := a.setPassword(id, pw); err != nil {
 		return "", err
 	} else {
-		_, _ = db.Exec(`UPDATE users SET disabled=0 WHERE id=?`, id)
+		_, _ = db.Exec(`UPDATE users SET disabled=0, login_mode=? WHERE id=?`, LoginPassword, id)
 	}
 	f := filepath.Join(cfg.DataDir, "initial_password")
 	if err := os.WriteFile(f, []byte(fmt.Sprintf("%s\n%s\n", username, pw)), 0o600); err != nil {

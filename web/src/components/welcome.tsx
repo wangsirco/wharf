@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { Field } from '@/components/common'
 import { BrandMark } from '@/components/brand-mark'
 import { DepsPanel } from '@/components/deps'
+import { LoginModeStep } from '@/components/login-mode'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -108,6 +109,7 @@ export function Welcome() {
       ),
       next: saveNames,
     },
+    { title: '以后怎么登录？', body: <LoginModeStep /> },
     {
       title: '你可以用它做什么',
       body: (

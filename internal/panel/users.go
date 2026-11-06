@@ -29,6 +29,7 @@ type User struct {
 	CreatedAt   int64          `json:"created_at"`
 	UpdatedAt   int64          `json:"updated_at"`
 	LastLoginAt int64          `json:"last_login_at"`
+	LoginMode   string         `json:"login_mode"`
 }
 
 // auditView is what gets stored in audit before/after (never the password hash).
@@ -58,12 +59,12 @@ func hashPassword(p string) (string, error) {
 	return string(h), err
 }
 
-const userCols = `id, username, display_name, role, perms, quotas, grants, disabled, created_at, updated_at, last_login_at`
+const userCols = `id, username, display_name, role, perms, quotas, grants, disabled, created_at, updated_at, last_login_at, login_mode`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var perms, quotas, grants string
-	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &perms, &quotas, &grants, &u.Disabled, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &perms, &quotas, &grants, &u.Disabled, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &u.LoginMode); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(perms), &u.Perms)
@@ -163,13 +164,13 @@ func (a *App) checkPassword(username, password string) (*User, error) {
 		// still run bcrypt so unknown usernames take as long as wrong passwords
 		dummyOnce.Do(func() { dummyHash, _ = bcrypt.GenerateFromPassword([]byte("owp-dummy"), 12) })
 		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-		return nil, errors.New("用户名或密码错误")
+		return nil, errors.New(errBadLogin)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		return nil, errors.New("用户名或密码错误")
+		return nil, errors.New(errBadLogin)
 	}
 	u, err := a.getUser(id)
 	if err != nil {

@@ -6,6 +6,7 @@
 - Public panel access on several names: through the 443 SNI front (real visitor IP via PROXY protocol, access control applies) and / or the panel port; one Let's Encrypt certificate for all names; one-click DDNS for a name · 面板公网访问（443 或独立端口，多个域名）
 - Panel names behind Cloudflare's orange cloud: an Origin Rule sends them to the panel port (open to Cloudflare only), Cloudflare gets the origin certificate (pasted or a 15-year one from the API), home devices the Let's Encrypt one · 面板域名可走 Cloudflare 橙色云，用源服务器证书
 - Alerts: icon per kind, device names in bold, one block per device; devices arriving together within a few minutes come as one message · 告警排版与合并
+- Sign-in per user, chosen in account security or the first-login wizard: password or passkey, password + passkey (two-step), or passkey only; the login page always offers both, and a passkey-only account answers a correct password like a wrong one. Weakening a strict mode needs a fresh proof; a super admin reset or `reset-super` restores the password · 每个账号可选登录方式：密码或 Passkey、密码 + Passkey、只用 Passkey
 - Fix: the sidebar scrolls on its own · 修复侧边栏不能单独滚动
 
 ## 0.18.2 — passkeys and device recognition · Passkey 登录与设备识别

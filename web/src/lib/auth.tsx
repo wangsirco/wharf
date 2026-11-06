@@ -2,12 +2,13 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { get, post, setCsrf, setUnauthorizedHandler } from './api'
 import type { Meta, User } from './types'
 import { browserTZ } from './beacon'
+import type { SecondStep } from './passkey'
 
 interface AuthState {
   user: User | null
   meta: Meta | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<SecondStep | null>
   adopt: (r: { user: unknown; csrf: string }) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
@@ -45,11 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const login = async (username: string, password: string) => {
-    const r = await post<{ user: User; csrf: string }>('/login', { username, password, tz: browserTZ() })
-    setCsrf(r.csrf)
-    setUser(r.user)
-    setMeta(await get<Meta>('/meta'))
-    setOnboarded((await get<{ onboarded: boolean }>('/me').catch(() => ({ onboarded: true }))).onboarded)
+    const r = await post<{ user: User; csrf: string } | SecondStep>('/login', { username, password, tz: browserTZ() })
+    if ('second_step' in r) return r // the password was right; the passkey comes next
+    await adopt(r)
+    return null
   }
   // after a passkey sign-in (lib/passkey.ts) the session exists already
   const adopt = async (r: { user: unknown; csrf: string }) => {

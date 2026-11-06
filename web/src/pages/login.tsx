@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Field, ErrorBox } from '@/components/common'
 import { CertHelp } from '@/components/cert-help'
 import { browserTZ } from '@/lib/beacon'
-import { passkeyLogin, passkeySupported } from '@/lib/passkey'
+import { finishSecondStep, passkeyLogin, passkeySupported, type SecondStep } from '@/lib/passkey'
 import { KeyRound } from 'lucide-react'
 
 export default function Login() {
@@ -18,19 +18,20 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [second, setSecond] = useState<SecondStep | null>(null)
   useEffect(() => { sendBeacon('/login') }, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true); setError('')
-    try { await login(username, password) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+    try { setSecond(await login(username, password)); setPassword('') } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
 
   const pk = brand.passkey
   const onName = !!pk?.hosts.includes(location.hostname)
   const usePasskey = async () => {
     setBusy(true); setError('')
-    try { await adopt(await passkeyLogin(browserTZ())) } catch (err) { if ((err as Error).message !== '已取消') setError((err as Error).message) } finally { setBusy(false) }
+    try { await adopt(second ? await finishSecondStep(second, browserTZ()) : await passkeyLogin(browserTZ())) } catch (err) { if ((err as Error).message !== '已取消') setError((err as Error).message) } finally { setBusy(false) }
   }
 
   return (
@@ -43,22 +44,35 @@ export default function Login() {
             {brand.subtitle && <p className="text-sm text-muted-foreground">{brand.subtitle}</p>}
           </div>
         </div>
-        <div className="grid gap-4">
-          <Field label="用户名"><Input autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
-          <Field label="密码"><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-          {error && <ErrorBox>{error}</ErrorBox>}
-          <Button type="submit" disabled={busy || !username || !password} className="h-9">{busy ? '登录中…' : '登录'}</Button>
-          {pk && onName && passkeySupported() && (
-            <Button type="button" variant="outline" disabled={busy} className="h-9" onClick={usePasskey}><KeyRound /> 用 Passkey 登录</Button>
-          )}
-          {pk && !onName && (
-            <p className="text-center text-xs text-muted-foreground">
-              想用 Passkey（Face ID / 指纹）登录？请通过 {pk.hosts.map((h, i) => (
-                <span key={h}>{i > 0 && ' 或 '}<a className="text-primary underline" href={`https://${h}${pk.port && pk.port !== '443' ? ':' + pk.port : ''}/login`}>{h}</a></span>
-              ))} 打开面板
-            </p>
-          )}
-        </div>
+        {second ? (
+          <div className="grid gap-4">
+            <p className="text-center text-sm text-muted-foreground">密码正确。还差一步：用 Passkey 确认是你本人。</p>
+            {error && <ErrorBox>{error}</ErrorBox>}
+            <Button type="button" autoFocus disabled={busy} className="h-9" onClick={usePasskey}><KeyRound /> 验证 Passkey</Button>
+            <Button type="button" variant="ghost" disabled={busy} className="h-9" onClick={() => { setSecond(null); setError('') }}>返回</Button>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            <Field label="用户名"><Input autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
+            <Field label="密码"><Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            {error && <ErrorBox>{error}</ErrorBox>}
+            {error === '用户名或密码错误' && pk && onName && passkeySupported() && <p className="text-xs text-muted-foreground">如果这个账号设置了「只用 Passkey」，请点下面的按钮登录。</p>}
+            <Button type="submit" disabled={busy || !username || !password} className="h-9">{busy ? '登录中…' : '登录'}</Button>
+            {pk && onName && passkeySupported() && (
+              <>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border" />或<span className="h-px flex-1 bg-border" /></div>
+                <Button type="button" variant="outline" disabled={busy} className="h-9" onClick={usePasskey}><KeyRound /> 用 Passkey 登录</Button>
+              </>
+            )}
+            {pk && !onName && (
+              <p className="text-center text-xs text-muted-foreground">
+                想用 Passkey（Face ID / 指纹）登录？请通过 {pk.hosts.map((h, i) => (
+                  <span key={h}>{i > 0 && ' 或 '}<a className="text-primary underline" href={`https://${h}${pk.port && pk.port !== '443' ? ':' + pk.port : ''}/login`}>{h}</a></span>
+                ))} 打开面板
+              </p>
+            )}
+          </div>
+        )}
       </form>
       {brand.cert && <CertHelp cert={brand.cert} />}
     </div>

@@ -69,14 +69,39 @@ export async function addPasskey(name: string) {
   return post(`/me/passkeys/finish?flow=${b.flow}`, toJSON(cred))
 }
 
-// passkeyLogin signs in with any passkey for this name (no username).
-export async function passkeyLogin(tz: string) {
-  const b = await post<{ flow: string; options: Json }>('/login/passkey/begin', {})
-  let cred: PublicKeyCredential
+export function defaultPasskeyName() {
+  const ua = navigator.userAgent
+  if (/iPhone/.test(ua)) return 'iPhone'
+  if (/iPad/.test(ua)) return 'iPad'
+  if (/Android/.test(ua)) return 'Android 手机'
+  if (/Macintosh/.test(ua)) return 'Mac'
+  if (/Windows/.test(ua)) return 'Windows 电脑'
+  return '我的设备'
+}
+
+async function assert(options: Json) {
   try {
-    cred = await navigator.credentials.get({ publicKey: requestOptions(b.options) }) as PublicKeyCredential
+    return await navigator.credentials.get({ publicKey: requestOptions(options) }) as PublicKeyCredential
   } catch (e) {
     throw new Error(cancelled(e) ? '已取消' : (e as Error).message)
   }
-  return post<{ user: unknown; csrf: string }>(`/login/passkey/finish?flow=${b.flow}&tz=${encodeURIComponent(tz)}`, toJSON(cred))
+}
+
+// verifyPasskey proves the signed-in user holds a passkey, before weakening a strict mode.
+export async function verifyPasskey() {
+  const b = await post<{ flow: string; options: Json }>('/me/reauth/begin', {})
+  await post(`/me/reauth/finish?flow=${b.flow}`, toJSON(await assert(b.options)))
+}
+
+export interface SecondStep { second_step: true; flow: string; options: Json }
+
+// finishSecondStep: the password was right; the passkey completes the sign-in.
+export async function finishSecondStep(s: SecondStep, tz: string) {
+  return post<{ user: unknown; csrf: string }>(`/login/passkey/finish?flow=${s.flow}&tz=${encodeURIComponent(tz)}`, toJSON(await assert(s.options)))
+}
+
+// passkeyLogin signs in with any passkey for this name (no username).
+export async function passkeyLogin(tz: string) {
+  const b = await post<{ flow: string; options: Json }>('/login/passkey/begin', {})
+  return post<{ user: unknown; csrf: string }>(`/login/passkey/finish?flow=${b.flow}&tz=${encodeURIComponent(tz)}`, toJSON(await assert(b.options)))
 }

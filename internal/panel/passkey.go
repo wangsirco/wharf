@@ -52,10 +52,18 @@ var pkFlows struct {
 type pkFlow struct {
 	data webauthn.SessionData
 	uid  int64
+	kind string // pkAdd, pkLogin, pkSecond or pkReauth: a flow only finishes what it began
 	rp   string
 	name string
 	exp  time.Time
 }
+
+const (
+	pkAdd    = "add"
+	pkLogin  = "login"
+	pkSecond = "second"
+	pkReauth = "reauth"
+)
 
 func pkPut(f pkFlow) string {
 	pkFlows.Lock()
@@ -152,6 +160,9 @@ func (a *App) handlePasskeyBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
+	if !a.reauthed(w, r, u) {
+		return
+	}
 	pu := &pkUser{u: u, creds: a.passkeyCreds(u.ID, rp)}
 	creation, data, err := wa.BeginRegistration(pu,
 		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
@@ -160,7 +171,7 @@ func (a *App) handlePasskeyBegin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 500, err.Error())
 		return
 	}
-	flow := pkPut(pkFlow{data: *data, uid: u.ID, rp: rp, name: firstNonEmpty(clean(req.Name, 40), "Passkey")})
+	flow := pkPut(pkFlow{data: *data, uid: u.ID, kind: pkAdd, rp: rp, name: firstNonEmpty(clean(req.Name, 40), "Passkey")})
 	writeJSON(w, 200, map[string]any{"flow": flow, "options": creation.Response})
 }
 
@@ -168,7 +179,7 @@ func (a *App) handlePasskeyBegin(w http.ResponseWriter, r *http.Request) {
 func (a *App) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 	f, ok := pkTake(r.URL.Query().Get("flow"))
 	u := currentUser(r)
-	if !ok || f.uid != u.ID {
+	if !ok || f.uid != u.ID || f.kind != pkAdd {
 		jsonErr(w, 400, "操作超时，请重新添加")
 		return
 	}
@@ -196,9 +207,16 @@ func (a *App) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/me/passkeys/{id}
 func (a *App) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	var name string
-	if a.db.QueryRow(`SELECT name FROM passkeys WHERE id=? AND user_id=?`, pathID(r), u.ID).Scan(&name) != nil {
+	var name, rp string
+	if a.db.QueryRow(`SELECT name, rp_id FROM passkeys WHERE id=? AND user_id=?`, pathID(r), u.ID).Scan(&name, &rp) != nil {
 		jsonErr(w, 404, "没有这个 Passkey")
+		return
+	}
+	if !a.reauthed(w, r, u) {
+		return
+	}
+	if u.LoginMode != LoginPassword && slices.Contains(a.passkeyHosts(), rp) && a.usablePasskeyCount(u.ID) <= 1 {
+		jsonErr(w, 400, "这是你最后一个 Passkey，删除后就无法登录了；请先把登录方式改回「密码或 Passkey」")
 		return
 	}
 	_, _ = a.db.Exec(`DELETE FROM passkeys WHERE id=? AND user_id=?`, pathID(r), u.ID)
@@ -222,7 +240,7 @@ func (a *App) handlePasskeyLoginBegin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"flow": pkPut(pkFlow{data: *data, rp: rp}), "options": assertion.Response})
+	writeJSON(w, 200, map[string]any{"flow": pkPut(pkFlow{data: *data, kind: pkLogin, rp: rp}), "options": assertion.Response})
 }
 
 // POST /api/login/passkey/finish?flow=&tz= (public; body: the browser's assertion)
@@ -247,25 +265,44 @@ func (a *App) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var who *User
-	user, cred, err := wa.FinishPasskeyLogin(func(rawID, handle []byte) (webauthn.User, error) {
-		uid, ok := userIDFromHandle(handle)
-		if !ok {
-			return nil, errors.New("unknown user")
+	var cred *webauthn.Credential
+	switch f.kind {
+	case pkLogin:
+		_, cred, err = wa.FinishPasskeyLogin(func(rawID, handle []byte) (webauthn.User, error) {
+			uid, ok := userIDFromHandle(handle)
+			if !ok {
+				return nil, errors.New("unknown user")
+			}
+			u, err := a.getUser(uid)
+			if err != nil || u.Disabled {
+				return nil, errors.New("账号不存在或已停用")
+			}
+			who = u
+			return &pkUser{u: u, creds: a.passkeyCreds(uid, rp)}, nil
+		}, f.data, r)
+	case pkSecond: // the password was right; this is the second step of the same sign-in
+		var u *User
+		if u, err = a.getUser(f.uid); err == nil && u.Disabled {
+			err = errors.New("账号已停用")
 		}
-		u, err := a.getUser(uid)
-		if err != nil || u.Disabled {
-			return nil, errors.New("账号不存在或已停用")
+		if err == nil {
+			cred, err = wa.FinishLogin(&pkUser{u: u, creds: a.passkeyCreds(u.ID, rp)}, f.data, r)
+			who = u
 		}
-		who = u
-		return &pkUser{u: u, creds: a.passkeyCreds(uid, rp)}, nil
-	}, f.data, r)
-	if err != nil || who == nil || user == nil {
-		a.limiter.record("ip:" + ip)
+	default:
+		err = errors.New("flow")
+	}
+	if err != nil || who == nil || cred == nil {
+		a.limiter.record(pkFailKeys(ip, f, who)...)
 		jsonErr(w, 401, "Passkey 验证失败："+pkErr(err))
 		return
 	}
+	if f.kind == pkLogin && a.effectiveLoginMode(who) == LoginTwoStep {
+		jsonErr(w, 401, "这个账号设置了「密码 + Passkey」，请先输入用户名和密码")
+		return
+	}
 	if cred.Authenticator.CloneWarning {
-		a.limiter.record("ip:" + ip)
+		a.limiter.record(pkFailKeys(ip, f, who)...)
 		jsonErr(w, 401, "这个 Passkey 的签名计数异常（可能被复制），已拒绝；请删除它后重新添加")
 		return
 	}
@@ -277,8 +314,19 @@ func (a *App) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.limiter.reset("ip:"+ip, "user:"+strings.ToLower(who.Username))
-	a.audit(actor{user: who, ip: ip}, "session.login", "session", strconv.FormatInt(who.ID, 10), "登录（Passkey）", nil, nil, false)
+	how := "登录（Passkey）"
+	if f.kind == pkSecond {
+		how = "登录（密码 + Passkey）"
+	}
+	a.audit(actor{user: who, ip: ip}, "session.login", "session", strconv.FormatInt(who.ID, 10), how, nil, nil, false)
 	writeJSON(w, 200, map[string]any{"user": who, "csrf": csrf})
+}
+
+func pkFailKeys(ip string, f pkFlow, who *User) []string {
+	if f.kind == pkSecond && who != nil {
+		return []string{"ip:" + ip, "user:" + strings.ToLower(who.Username)}
+	}
+	return []string{"ip:" + ip}
 }
 
 func pkErr(err error) string {

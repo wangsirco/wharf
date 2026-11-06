@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { KeyRound, Plus, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
-import { addPasskey, passkeySupported } from '@/lib/passkey'
+import { addPasskey, defaultPasskeyName, passkeySupported } from '@/lib/passkey'
+import { LoginMode, panelURL, useReauth, type PasskeyList } from '@/components/login-mode'
 import { ago, datetime } from '@/lib/format'
 import { Empty } from '@/components/common'
 import { toast } from 'sonner'
@@ -15,6 +16,7 @@ import { Input } from '@/components/ui/input'
 
 export default function Account() {
   const { refresh } = useAuth()
+  const { data: pk, reload } = useApi<PasskeyList>('/me/passkeys')
   const [f, setF] = useState({ old: '', new: '', confirm: '' })
   const [busy, setBusy] = useState(false)
   const save = async () => {
@@ -26,7 +28,10 @@ export default function Account() {
   return (
     <>
       <PageHeader title="账号安全" />
-      <Passkeys />
+      <Section title="登录方式" desc="选择登录这个账号需要什么。" className="max-w-2xl">
+        <div className="p-4"><LoginMode pk={pk} reload={reload} /></div>
+      </Section>
+      <Passkeys data={pk} reload={reload} />
       <Section title="修改密码" className="mt-4 max-w-lg">
         <div className="grid gap-4 p-4">
           <Field label="当前密码"><Input type="password" autoComplete="current-password" value={f.old} onChange={(e) => setF({ ...f, old: e.target.value })} /></Field>
@@ -39,27 +44,22 @@ export default function Account() {
   )
 }
 
-interface PasskeyList {
-  passkeys: { id: number; name: string; rp_id: string; created: number; last_used: number }[]
-  usable: boolean; here: string; hosts: string[]; port: string
-}
-
 // Passkeys: sign in with Face ID / a fingerprint / a security key; the password stays.
-function Passkeys() {
-  const { data, reload } = useApi<PasskeyList>('/me/passkeys')
+function Passkeys({ data, reload }: { data?: PasskeyList | null; reload: () => void }) {
+  const { ensure, dialog } = useReauth(data)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  const url = (h: string) => `https://${h}${data?.port && data.port !== '443' ? ':' + data.port : ''}/account`
+  const url = (h: string) => panelURL(h, data?.port ?? '', '/account')
   const add = async () => {
     setBusy(true)
-    try { await addPasskey(name || defaultName()); setName(''); toast.success('Passkey 已添加，下次可以直接用它登录'); reload() }
+    try { await ensure(); await addPasskey(name || defaultPasskeyName()); setName(''); toast.success('Passkey 已添加，下次可以直接用它登录'); reload() }
     catch (e) { if ((e as Error).message !== '已取消') toast.error((e as Error).message) } finally { setBusy(false) }
   }
   const remove = async (id: number) => {
-    try { await api('DELETE', `/me/passkeys/${id}`); toast.success('已删除'); reload() } catch (e) { toast.error((e as Error).message) }
+    try { await ensure(); await api('DELETE', `/me/passkeys/${id}`); toast.success('已删除'); reload() } catch (e) { if ((e as Error).message !== '已取消') toast.error((e as Error).message) }
   }
   return (
-    <Section title="Passkey" desc="用 Face ID、指纹或安全密钥登录，不用输入密码；密码依然可以用。每台设备 / 每个密码管理器可以各添加一个。" className="max-w-2xl">
+    <Section title="Passkey" desc="用 Face ID、指纹或安全密钥确认身份。每台设备 / 每个密码管理器可以各添加一个。" className="mt-4 max-w-2xl">
       <div className="divide-y">
         {data?.passkeys.map((p) => (
           <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
@@ -84,21 +84,12 @@ function Passkeys() {
           <p className="text-sm text-muted-foreground">这个浏览器不支持 Passkey，或者还不信任面板的证书（地址栏有警告时浏览器会禁用 Passkey）。</p>
         ) : (
           <div className="flex gap-2">
-            <Input placeholder={`名称，例如：${defaultName()}`} value={name} onChange={(e) => setName(e.target.value)} />
+            <Input placeholder={`名称，例如：${defaultPasskeyName()}`} value={name} onChange={(e) => setName(e.target.value)} />
             <Button disabled={busy} onClick={add}><Plus /> 添加 Passkey</Button>
           </div>
         )}
       </div>
+      {dialog}
     </Section>
   )
-}
-
-function defaultName() {
-  const ua = navigator.userAgent
-  if (/iPhone/.test(ua)) return 'iPhone'
-  if (/iPad/.test(ua)) return 'iPad'
-  if (/Android/.test(ua)) return 'Android 手机'
-  if (/Macintosh/.test(ua)) return 'Mac'
-  if (/Windows/.test(ua)) return 'Windows 电脑'
-  return '我的设备'
 }

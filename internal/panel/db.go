@@ -191,6 +191,8 @@ var migrations = []string{
 	`CREATE TABLE passkeys (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		rp_id TEXT NOT NULL, cred_id TEXT NOT NULL UNIQUE, cred TEXT NOT NULL, name TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER NOT NULL DEFAULT 0);
 	 CREATE INDEX passkeys_user ON passkeys(user_id)`,
+	// v19: how each user signs in (password | two_step | passkey)
+	`ALTER TABLE users ADD COLUMN login_mode TEXT NOT NULL DEFAULT 'password'`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

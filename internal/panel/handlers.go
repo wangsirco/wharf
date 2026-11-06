@@ -30,6 +30,10 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/me/passkeys/begin", a.auth("", a.handlePasskeyBegin))
 	m.HandleFunc("POST /api/me/passkeys/finish", a.auth("", a.handlePasskeyFinish))
 	m.HandleFunc("DELETE /api/me/passkeys/{id}", a.auth("", a.handlePasskeyDelete))
+	m.HandleFunc("PUT /api/me/login-mode", a.auth("", a.handleLoginMode))
+	m.HandleFunc("POST /api/me/reauth", a.auth("", a.handleReauthPassword))
+	m.HandleFunc("POST /api/me/reauth/begin", a.auth("", a.handleReauthBegin))
+	m.HandleFunc("POST /api/me/reauth/finish", a.auth("", a.handleReauthFinish))
 	m.HandleFunc("POST /api/logout", a.handleLogout)
 	m.HandleFunc("GET /api/me", a.handleMe)
 	m.HandleFunc("POST /api/beacon", a.handleBeacon)
@@ -220,6 +224,16 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.limiter.record(keys...)
 		jsonErr(w, 401, err.Error())
+		return
+	}
+	switch a.effectiveLoginMode(u) {
+	case LoginPasskey:
+		// the same answer as a wrong password: a stranger learns nothing about this account
+		a.limiter.record(keys...)
+		jsonErr(w, 401, errBadLogin)
+		return
+	case LoginTwoStep:
+		a.beginSecondStep(w, r, u)
 		return
 	}
 	a.limiter.reset(keys...)
@@ -504,12 +518,18 @@ func (a *App) handleUserPassword(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "用户不存在")
 		return
 	}
+	if u.ID == currentUser(r).ID && u.LoginMode != LoginPassword {
+		jsonErr(w, 400, "请到「账号安全」修改自己的密码和登录方式")
+		return
+	}
 	if err := a.setPassword(u.ID, req.Password); err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
+	// someone who lost their passkey is let back in with this password
+	_, _ = a.db.Exec(`UPDATE users SET login_mode=? WHERE id=?`, LoginPassword, u.ID)
 	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "user.password.reset", "user", strconv.FormatInt(u.ID, 10),
-		fmt.Sprintf("重置 %s 的密码", u.Username), nil, nil, false)
+		fmt.Sprintf("重置 %s 的密码（登录方式恢复为密码）", u.Username), nil, nil, false)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

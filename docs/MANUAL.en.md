@@ -148,16 +148,34 @@ Passkeys let you sign in with Face ID, a fingerprint or a security key instead o
 
 A passkey belongs to the name it was added on. Passkey sign-ins go through the same rate limit and access control as passwords and are audited (*登录（Passkey）*).
 
+**Choose how you sign in** (*账号安全 → 登录方式*, also offered in the first-login wizard; set per user):
+
+| Mode | What signing in takes | Suits |
+|---|---|---|
+| Password or passkey (default) | either one | a panel used only at home |
+| Password + passkey | the password, then the passkey; neither alone gets in | two-step verification |
+| Passkey only | a passkey; even the right password does not open the account | a panel on the internet, where strangers try passwords |
+
+The login page always shows both the username and password form and the passkey button, so nobody can tell which account uses which mode: a passkey-only account given its correct password answers exactly as for a wrong one.
+
+- Choosing one of the last two creates a passkey on the spot if you have none. That is not possible when the panel was opened by IP address; the page links to the right address.
+- A passkey belongs to its name: with a passkey on `wharf.lan` only, you cannot sign in from a public name, and the page warns which names are missing. Add one on each name you use, and on two devices or in a password manager that syncs.
+- Moving to a stricter mode signs the account out on other devices.
+- An account already in one of the last two modes confirms it is you (passkey or password) before changing the mode or adding or removing a passkey. The last passkey cannot be removed until the mode is back to *password or passkey*.
+
+**Locked out?** An admin: ask the super admin to reset your password, which also restores *password or passkey*. The super admin: reset the super admin password in the LuCI page (or run `owp-panel reset-super`), which does the same. If every name holding an account's passkeys is removed, that account can use its password again automatically.
+
 ### 4.5 First-login wizard
 
-Every user sees a 5–6 step wizard on first login. Any step can be skipped:
+Every user sees a 6–7 step wizard on first login. Any step can be skipped:
 
 1. **Welcome:** what Wharf does.
 2. **Your name:** your display name. The super admin can also name the panel; the name appears on the login page, the sidebar, the browser tab and the home-screen icon.
-3. **Tour:** only the features you have permission for.
-4. **Pick a look:** simple mode for family or pro mode for tinkerers. You can switch any time at the top right.
-5. **Check components** (super admin only): lists missing optional packages and installs them in one click. See section 5.
-6. **Ready:** suggested next steps for the super admin (change password, set up alerts, restrict internet access to the panel, create accounts for family).
+3. **How you will sign in:** password or passkey, password + passkey, or passkey only. See 4.4.
+4. **Tour:** only the features you have permission for.
+5. **Pick a look:** simple mode for family or pro mode for tinkerers. You can switch any time at the top right.
+6. **Check components** (super admin only): lists missing optional packages and installs them in one click. See section 5.
+7. **Ready:** suggested next steps for the super admin (change password, set up alerts, restrict internet access to the panel, create accounts for family).
 
 You can reopen it later from the user menu → *使用向导*.
 

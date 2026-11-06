@@ -1,3 +1,4 @@
+import { loginModeNames } from '@/components/login-mode'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Plus, ShieldCheck } from 'lucide-react'
@@ -87,7 +88,7 @@ function UserPanel({ meta, target, onClose, onSaved }: { meta: Meta; target: Use
   }
   const resetPw = async () => {
     setBusy(true)
-    try { await post(`/users/${u!.id}/password`, { password: newPw }); toast.success('密码已重置，该用户需要重新登录'); setNewPw('') }
+    try { await post(`/users/${u!.id}/password`, { password: newPw }); toast.success('密码已重置，登录方式恢复为密码或 Passkey；该用户需要重新登录'); setNewPw('') }
     catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -151,6 +152,7 @@ function UserPanel({ meta, target, onClose, onSaved }: { meta: Meta; target: Use
         {!isNew && (
           <div className="grid gap-3">
             <h3 className="text-sm font-semibold">重置密码</h3>
+            <p className="text-xs text-muted-foreground">登录方式：{loginModeNames[u!.login_mode]}。{u!.login_mode !== 'password' && '重置后恢复为「密码或 Passkey」，丢了 Passkey 时可以这样找回。'}</p>
             <div className="flex gap-2">
               <Input type="password" autoComplete="new-password" placeholder="新密码（至少 8 位）" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
               <Button variant="outline" disabled={busy || newPw.length < 8} onClick={resetPw}>重置</Button>
