@@ -11,6 +11,7 @@ import { Dot, Field, Pill, Section, useConfirm } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { BerthCard } from '@/components/berth-card'
 
 type Settings = Record<string, string>
 interface AgentStatus { ok: boolean; url: string; error?: string; version?: string; hostname?: string; firewall?: string; time?: number }
@@ -128,6 +129,7 @@ export default function SettingsPage() {
           <div className="p-4"><Button variant="outline" size="sm" disabled={geoBusy} onClick={updateGeo}><RefreshCw className={geoBusy ? 'animate-spin' : ''} /> 立即更新</Button></div>
         </Section>
         <PanelNames />
+        <BerthCard />
         <NextDNSSettings draft={draft} setDraft={setDraft} saved={s} />
         <PVESettings draft={draft} setDraft={setDraft} saved={s} />
         <UpdateSettings draft={draft} setDraft={setDraft} />

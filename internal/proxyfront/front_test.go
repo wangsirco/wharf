@@ -13,3 +13,13 @@ func TestPrivateClient(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteWildcard(t *testing.T) {
+	f := &front{routes: map[string]Route{"node.example.net": {Backend: "n"}, "*.home.example.net": {Backend: "b"}}}
+	for name, want := range map[string]string{"node.example.net": "n", "vault.home.example.net": "b", "a.b.home.example.net": "", "home.example.net": ""} {
+		r, ok := f.route(name)
+		if (want == "") == ok || r.Backend != want {
+			t.Errorf("%s → %q %v", name, r.Backend, ok)
+		}
+	}
+}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowRight, BarChart3, Globe2, Plus, Search, ShieldBan, ShieldCheck } from 'lucide-react'
+import { Anchor, ArrowRight, BarChart3, Globe2, Plus, Search, ShieldBan, ShieldCheck } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
 import { runAction } from '@/lib/actions'
+import { openBerth } from '@/lib/berth'
 import type { Forward, ForwardTarget, PortsInfo, RegionInfo } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { grantLabel } from '@/components/grants'
@@ -59,7 +60,9 @@ export default function Forwards() {
       .filter((f) => !s || [f.name, f.device_name, f.device_now, f.vm_tag, f.lan_ip, f.lan_port, f.wan_port, f.note, f.owner_name].some((x) => (x ?? '').toLowerCase().includes(s)))
   }, [data, q, scope])
 
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const toggle = async (f: Forward, on: boolean) => {
+    if (f.kind === 'berth' && !(await confirm(`仍要在 Wharf 里${on ? '启用' : '停用'}？`, '这条映射由 Berth 管理，建议在 Berth 里操作。Wharf 会通知 Berth，把对应站点标为「外部修改」。', { ok: on ? '仍要启用' : '仍要停用' }))) return
     try { await runAction('forward.toggle', { id: f.id, rev: f.rev, enabled: on }) } catch (e) { toast.error((e as Error).message) } finally { reload() }
   }
   const quota = data && data.quota >= 0 ? `已用 ${data.used} / ${data.quota} 条` : ''
@@ -100,6 +103,7 @@ export default function Forwards() {
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate font-medium">{f.kind === 'proxy' ? f.name.replace(/^Wharf 代理 · /, '') : f.managed ? f.device_now || f.device_name || f.lan_ip : f.name || f.id}</span>
                     {f.kind === 'proxy' && <Pill tone="blue">代理节点</Pill>}
+                    {f.kind === 'berth' && <BerthBadge f={f} />}
                     <VMTag tag={f.vm_tag} />
                     {f.online === false && <span className="shrink-0 text-[11px] text-muted-foreground">离线</span>}
                   </div>
@@ -122,6 +126,7 @@ export default function Forwards() {
       </Section>
       <ForwardPanel target={sel} onClose={() => setSel(null)} onSaved={() => { setSel(null); reload() }} onStats={(f) => { setSel(null); setStats(f) }} />
       <ForwardStats f={stats} onClose={() => setStats(null)} />
+      {confirmDialog}
     </>
   )
 }
@@ -159,7 +164,10 @@ function ForwardPanel({ target, onClose, onSaved, onStats }: { target: Forward |
   const owner = f && f.owner_id ? { id: f.owner_id, name: f.owner_name } : { id: user?.id ?? 0, name: user?.username ?? '' }
   const preview = `OWP|uid=${owner.id}|user=${owner.name}|dev=${form.device_name}|${form.lan_ip || '?'}:${form.lan_port || '?'}>${form.wan || 'wan'}:${form.wan_port || '?'}/${form.proto.replace(' ', '+')}${form.note ? '|note=' + form.note : ''}`
 
+  const berthOK = async (verb: string) => f?.kind !== 'berth' ||
+    confirm(`仍要在 Wharf 里${verb}？`, 'Wharf 会通知 Berth，把对应站点标为「外部修改」。', { ok: `仍要${verb}` })
   const save = async () => {
+    if (!(await berthOK('修改'))) return
     if (form.mode === 'all' && !(await confirm('对所有人开放该端口？', '任何人都可以从公网访问这个端口。普通管理员执行此操作需要超级管理员批准。', { ok: '确认开放' }))) return
     setBusy(true)
     try {
@@ -168,7 +176,8 @@ function ForwardPanel({ target, onClose, onSaved, onStats }: { target: Forward |
     } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
   const remove = async () => {
-    if (!f || !(await confirm('删除该端口转发？', `WAN ${f.wan_port} → ${f.lan_ip}:${f.lan_port}`, { danger: true, ok: '删除' }))) return
+    if (!f || !(await berthOK('删除'))) return
+    if (!(await confirm('删除该端口转发？', `WAN ${f.wan_port} → ${f.lan_ip}:${f.lan_port}`, { danger: true, ok: '删除' }))) return
     setBusy(true)
     try { await runAction('forward.delete', { id: f.id, rev: f.rev }); onSaved() } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
@@ -184,6 +193,16 @@ function ForwardPanel({ target, onClose, onSaved, onStats }: { target: Forward |
           <Button disabled={busy || !form.lan_ip || !form.lan_port || !form.wan_port || portOk === false} onClick={save}>{busy ? '应用中…' : isNew ? '创建' : '保存'}</Button>
         </>
       )}>
+      {f?.kind === 'berth' && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-accent/40 p-3 text-sm">
+          <Anchor className="mt-0.5 size-4 shrink-0 text-primary" />
+          <span className="grid gap-1">
+            <span>这条映射由 Berth 管理：删除站点时会自动撤销。{f.berth_ref && <span className="text-muted-foreground">来源：{f.berth_ref.replace(/^site:/, '站点 ')}</span>}</span>
+            <span className="text-xs text-muted-foreground">建议在 Berth 里修改。{editable ? '超级管理员可以在这里强制修改，Berth 会收到通知。' : ''}</span>
+            <Button variant="outline" size="sm" className="w-fit" onClick={() => openBerth({ ref: f.berth_ref }).catch((e) => toast.error((e as Error).message))}>在 Berth 里打开</Button>
+          </span>
+        </div>
+      )}
       {f && <Button variant="outline" size="sm" className="mb-4" onClick={() => onStats(f)}><BarChart3 /> 查看流量与连接记录</Button>}
       <fieldset key={f?.id ?? 'new'} disabled={!editable} className="grid gap-6">
         <div className="grid gap-4 rounded-xl border p-4">
@@ -232,7 +251,7 @@ function ForwardPanel({ target, onClose, onSaved, onStats }: { target: Forward |
           <div className="text-xs font-medium text-muted-foreground">写入 OpenWrt 的备注（预览）</div>
           <code className="break-all rounded-lg bg-muted px-3 py-2 text-xs">{preview}</code>
         </div>
-        {!editable && <p className="text-sm text-muted-foreground">该规则不是你创建的，只能查看。</p>}
+        {!editable && f?.kind !== 'berth' && <p className="text-sm text-muted-foreground">该规则不是你创建的，只能查看。</p>}
       </fieldset>
       {dialog}
     </HalfPanel>
@@ -297,5 +316,15 @@ function PortHelper({ form, id, onPick, onCheck }: { form: Form; id?: string; on
         </div>
       )}
     </div>
+  )
+}
+
+// BerthBadge: made by Berth; a click opens the Berth site it belongs to (signed in already)
+function BerthBadge({ f }: { f: Forward }) {
+  return (
+    <button type="button" title={f.berth_ref ? `来自 Berth：${f.berth_ref}` : '由 Berth 创建'} className="shrink-0"
+      onClick={(e) => { e.stopPropagation(); openBerth({ ref: f.berth_ref }).catch((err) => toast.error((err as Error).message)) }}>
+      <Pill tone="blue"><Anchor className="size-3" />Berth{f.berth_ref ? ` · ${f.berth_ref.replace(/^site:/, '')}` : ''}</Pill>
+    </button>
   )
 }

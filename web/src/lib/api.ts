@@ -36,3 +36,4 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 export const get = <T,>(p: string) => api<T>('GET', p)
 export const post = <T,>(p: string, b: unknown = {}) => api<T>('POST', p, b)
 export const put = <T,>(p: string, b: unknown) => api<T>('PUT', p, b)
+export const del = <T,>(p: string) => api<T>('DELETE', p)

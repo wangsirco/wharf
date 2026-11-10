@@ -111,3 +111,46 @@ func (v *Verifier) Verify(r *http.Request) ([]byte, error) {
 	v.nonces[keyID+nonce] = now.Add(2 * MaxSkew)
 	return body, nil
 }
+
+// ---- token-bound signing between paired panels (Wharf ⇄ Berth) ----
+//
+// Same canonical string as above. The caller sends "Authorization: Bearer <token>" and
+// <P>-Ts, <P>-Nonce, <P>-Sig, where <P> is the sender's header prefix ("X-Berth" when Berth
+// calls Wharf, "X-Wharf" the other way) and the HMAC key is DeriveKey(token).
+
+// DeriveKey turns a pairing token into its request-signing key.
+func DeriveKey(token string) []byte {
+	m := hmac.New(sha256.New, []byte(token))
+	m.Write([]byte("wharf-berth-sign-v1"))
+	return m.Sum(nil)
+}
+
+// SignPrefixed adds <prefix>-Ts, -Nonce and -Sig headers to req.
+func SignPrefixed(req *http.Request, prefix string, key, body []byte) {
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce := RandomHex(12)
+	req.Header.Set(prefix+"-Ts", ts)
+	req.Header.Set(prefix+"-Nonce", nonce)
+	req.Header.Set(prefix+"-Sig", mac(key, canonical(req.Method, req.URL.RequestURI(), ts, nonce, body)))
+}
+
+// CheckPrefixed verifies the time window and signature of a request whose body has
+// already been read; it returns the nonce so the caller can reject replays durably.
+func CheckPrefixed(r *http.Request, prefix string, key, body []byte) (string, error) {
+	ts, nonce, sig := r.Header.Get(prefix+"-Ts"), r.Header.Get(prefix+"-Nonce"), r.Header.Get(prefix+"-Sig")
+	if ts == "" || nonce == "" || sig == "" || len(nonce) > 64 {
+		return "", ErrUnsigned
+	}
+	t, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return "", ErrSkew
+	}
+	if d := time.Since(time.Unix(t, 0)); d > MaxSkew || d < -MaxSkew {
+		return "", ErrSkew
+	}
+	want := mac(key, canonical(r.Method, r.URL.RequestURI(), ts, nonce, body))
+	if !hmac.Equal([]byte(want), []byte(sig)) {
+		return "", ErrSignature
+	}
+	return nonce, nil
+}

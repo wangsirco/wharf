@@ -158,25 +158,27 @@ func mustJSON(v any) string {
 // ---- settings ----
 
 var settingDefaults = map[string]string{
-	"approval.required":         `["device.static.delete", "forward.delete"]`,
-	"approval.expire_hours":     "24",
-	"approval.forward_open_all": "1", // admins opening a forward to everyone need approval
-	"retention.audit_days":      "365",
-	"retention.visitor_days":    "90",
-	"retention.traffic_days":    "7",
-	"retention.traffic_mb":      "1024",
-	"rules.update_hours":        "72",
-	"presence.away_minutes":     "10",              // unseen this long = left the network
-	"identity.dhcp_log":         "1",               // dnsmasq logs DHCP option lists (device fingerprints)
-	"identity.probe":            "1",               // ask LAN devices about themselves (mDNS / UPnP) every 10 min
-	"ui.name":                   "Wharf",           // panel name on the login page, sidebar and browser tab
-	"panel.public_name":         "",                // public name with a Let's Encrypt certificate (panelname.go)
-	"cloudflare.token":          "",                // Cloudflare account token (DDNS, panel names; cloudflare.go)
-	"panel.cf_token":            "",                // Cloudflare token for its DNS-01 challenge
-	"ui.timezone":               "",                // IANA zone for times in alerts; "" = the router's zone
-	"ui.subtitle":               "OpenWrt 控制面板",    //
-	"update.repo":               "wangsirco/wharf", // GitHub owner/name the online update uses
-	"update.check":              "1",
+	"approval.required":          `["device.static.delete", "forward.delete"]`,
+	"approval.expire_hours":      "24",
+	"approval.forward_open_all":  "1", // admins opening a forward to everyone need approval
+	"retention.audit_days":       "365",
+	"retention.visitor_days":     "90",
+	"retention.traffic_days":     "7",
+	"retention.traffic_mb":       "1024",
+	"rules.update_hours":         "72",
+	"presence.away_minutes":      "10",              // unseen this long = left the network
+	"identity.dhcp_log":          "1",               // dnsmasq logs DHCP option lists (device fingerprints)
+	"identity.probe":             "1",               // ask LAN devices about themselves (mDNS / UPnP) every 10 min
+	"ui.name":                    "Wharf",           // panel name on the login page, sidebar and browser tab
+	"panel.public_name":          "",                // public name with a Let's Encrypt certificate (panelname.go)
+	"cloudflare.token":           "",                // Cloudflare account token (DDNS, panel names; cloudflare.go)
+	"panel.cf_token":             "",                // Cloudflare token for its DNS-01 challenge
+	"ui.timezone":                "",                // IANA zone for times in alerts; "" = the router's zone
+	"ui.subtitle":                "OpenWrt 控制面板",    //
+	"update.repo":                "wangsirco/wharf", // GitHub owner/name the online update uses
+	"update.check":               "1",
+	"alerts.primary":             "wharf", // who sends alerts when paired with Berth: wharf | berth
+	"bans.default_sync_to_berth": "0",     // new bans also go to Berth by default
 }
 
 func (a *App) setting(key string) string {
@@ -238,6 +240,7 @@ func (a *App) housekeeping() {
 		_, _ = a.db.Exec(`UPDATE approvals SET status='expired' WHERE status='pending' AND ts < ?`,
 			now.Unix()-int64(a.settingInt("approval.expire_hours"))*3600)
 		a.trafficRetention()
+		a.berthHousekeeping()
 		time.Sleep(10 * time.Minute)
 	}
 }

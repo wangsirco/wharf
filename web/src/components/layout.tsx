@@ -1,9 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
+  Anchor,
   Activity, ArrowLeftRight, BarChart3, Ban, BellRing, Earth, ShieldAlert, Search as SearchIcon, ClipboardCheck, Globe, LayoutDashboard, ShieldHalf, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Users, X, KeyRound, Inbox, Wrench, Cpu, Sparkles, ArrowUpCircle, Rocket, Waypoints,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth'
+import { openBerth, useBerth } from '@/lib/berth'
 import { useApi } from '@/lib/hooks'
 import { useBrand } from '@/lib/brand'
 import { applyTheme, getTheme, type Theme } from '@/lib/theme'
@@ -94,6 +97,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 function UserMenu() {
   const { user, logout } = useAuth()
+  const berth = useBerth()
   const [theme, setTheme] = useState<Theme>(getTheme())
   const pick = (t: Theme) => { setTheme(t); applyTheme(t) }
   if (!user) return null
@@ -115,6 +119,9 @@ function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem render={<NavLink to="/account" />}><KeyRound /> 账号安全（密码 / Passkey）</DropdownMenuItem>
         <DropdownMenuItem onClick={() => window.dispatchEvent(new Event('owp:welcome'))}><Sparkles /> 使用向导</DropdownMenuItem>
+        {berth.paired && berth.state === 'active' && (
+          <DropdownMenuItem onClick={() => openBerth().catch((e) => toast.error((e as Error).message))}><Anchor /> 打开 Berth（{berth.name}）</DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={logout}><LogOut /> 退出登录</DropdownMenuItem>
       </DropdownMenuContent>

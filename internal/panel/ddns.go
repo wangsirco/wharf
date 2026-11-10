@@ -172,7 +172,7 @@ func (a *App) handleDDNS(w http.ResponseWriter, r *http.Request) {
 			ifaces = append(ifaces, "wan6")
 		}
 	}
-	writeJSON(w, 200, map[string]any{"items": list, "providers": ddnsProviders, "ip_services": svcs, "ifaces": ifaces})
+	writeJSON(w, 200, map[string]any{"items": list, "providers": ddnsProviders, "ip_services": svcs, "ifaces": ifaces, "owners": a.ddnsOwners()})
 }
 
 func (d *DDNS) normalize() error {
@@ -288,6 +288,10 @@ func (a *App) handleDDNSSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		before = cur
+		if a.ddnsOwnedByBerth(cur.Domain) {
+			jsonErr(w, 409, "这个域名由 Berth 维护，在 Wharf 里只读")
+			return
+		}
 		for k, v := range d.Creds {
 			if strings.HasPrefix(v, "••") {
 				d.Creds[k] = cur.Creds[k]
@@ -390,6 +394,10 @@ func (a *App) handleDDNSRun(w http.ResponseWriter, r *http.Request) {
 	d, err := scanDDNS(a.db.QueryRow(`SELECT `+ddnsCols+` FROM ddns WHERE id=?`, id))
 	if err != nil {
 		jsonErr(w, 404, "不存在")
+		return
+	}
+	if a.ddnsOwnedByBerth(d.Domain) {
+		jsonErr(w, 409, "这个域名由 Berth 维护")
 		return
 	}
 	ip, msg, err := a.runDDNS(d, true)
@@ -631,8 +639,9 @@ func (a *App) ddnsLoop() {
 	for {
 		list, _ := a.ddnsList()
 		now := time.Now()
+		owners := a.ddnsOwners()
 		for _, d := range list {
-			if !d.Enabled {
+			if !d.Enabled || owners[d.Domain] == "berth" { // Berth keeps that name up to date
 				continue
 			}
 			due := d.Interval > 0 && now.Unix()-d.LastRun >= int64(d.Interval)*60

@@ -546,7 +546,9 @@ type frontFallback struct {
 
 // acmeOK: the shared port is 443, where Let's Encrypt can validate (TLS-ALPN-01).
 // panel: the panel's public names, routed to its loopback listener (panelname.go).
-func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback, acmeOK bool, panel *panelRoute) (string, bool) {
+// berth: names the paired Berth registered (berth_api.go), passed through untouched; nodes
+// and the panel's own names take precedence.
+func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontFallback, acmeOK bool, panel *panelRoute, berth *berthSNIReg) (string, bool) {
 	type route struct {
 		SNI     []string `json:"sni"`
 		Backend string   `json:"backend"`
@@ -571,6 +573,24 @@ func buildFront(nodes []*ProxyNode, site frontSite, acmeEmail string, fb *frontF
 	if panel != nil && len(panel.names) > 0 { // TLS stays end to end: the panel answers with its own certificate
 		routes = append(routes, route{SNI: panel.names, Backend: fmt.Sprintf("127.0.0.1:%d", panelProxyPort), Proxy: true, LANOnly: panel.lanOnly})
 		need = true
+	}
+	if berth != nil && berth.Target != "" {
+		var names []string
+		for _, d := range berth.Domains {
+			taken := false
+			for _, r := range routes {
+				for _, n := range r.SNI {
+					taken = taken || sniOverlap(n, d)
+				}
+			}
+			if !taken {
+				names = append(names, d)
+			}
+		}
+		if len(names) > 0 {
+			routes = append(routes, route{SNI: names, Backend: berth.Target, Proxy: berth.ProxyProtocol})
+			need = true
+		}
 	}
 	if site.Domain != "" && !slices.Contains(acme, site.Domain) {
 		acme = append(acme, site.Domain)

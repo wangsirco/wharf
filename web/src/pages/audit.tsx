@@ -25,7 +25,8 @@ export default function Audit() {
 
   const query = (beforeId?: number) => {
     const p = new URLSearchParams({ limit: String(PAGE) })
-    if (userId !== 'all') p.set('user_id', userId)
+    if (userId === 'berth') p.set('source', 'berth')
+    else if (userId !== 'all') p.set('user_id', userId)
     if (q.trim()) p.set('q', q.trim())
     if (beforeId) p.set('before_id', String(beforeId))
     return get<AuditEntry[]>('/audit?' + p)
@@ -40,9 +41,10 @@ export default function Audit() {
       <Section title="审计记录" action={
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <Select value={userId} onValueChange={(v) => setUserId(String(v))}>
-            <SelectTrigger size="sm" className="w-40"><SelectValue>{(v: string) => v === 'all' ? '全部用户' : users?.find((u) => String(u.id) === v)?.display_name ?? v}</SelectValue></SelectTrigger>
+            <SelectTrigger size="sm" className="w-40"><SelectValue>{(v: string) => v === 'all' ? '全部用户' : v === 'berth' ? '来自 Berth' : users?.find((u) => String(u.id) === v)?.display_name ?? v}</SelectValue></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部用户</SelectItem>
+              <SelectItem value="berth">来自 Berth</SelectItem>
               {users?.map((u) => <SelectItem key={u.id} value={String(u.id)}>{u.display_name}（{u.username}）</SelectItem>)}
             </SelectContent>
           </Select>

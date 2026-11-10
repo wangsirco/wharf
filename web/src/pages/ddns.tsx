@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { History, Loader2, Pencil, Play, Plus, Radar, Trash2 } from 'lucide-react'
+import { Anchor, History, Loader2, Pencil, Play, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, post } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { ago, datetime } from '@/lib/format'
@@ -18,7 +18,7 @@ interface Entry {
   last_ip: string; last_ok: number; last_run: number; last_err: string; created: number
 }
 interface Provider { id: string; name: string; fields: string[]; labels: string[]; help: string }
-interface Resp { items: Entry[]; providers: Provider[]; ip_services: { id: string; url: string; v6: boolean }[]; ifaces: string[] | null }
+interface Resp { items: Entry[]; providers: Provider[]; ip_services: { id: string; url: string; v6: boolean }[]; ifaces: string[] | null; owners?: Record<string, 'wharf' | 'berth'> }
 
 type Form = Omit<Entry, 'id' | 'last_ip' | 'last_ok' | 'last_run' | 'last_err' | 'created'> & { id?: number }
 
@@ -54,10 +54,25 @@ export default function DDNSPage() {
       </PageHeader>
       {error && <div className="mb-4"><ErrorBox>{error}</ErrorBox></div>}
       <CloudflareAccount onAdded={reload} />
+      <BerthDDNS onChanged={reload} />
       <Section title="域名" className="mt-4">
         {!data?.items.length ? <Empty>{data ? '还没有。添加一个域名，比如 home.example.com，让它始终指向家里。' : '加载中…'}</Empty> : (
           <div className="divide-y">
-            {data.items.map((e) => (
+            {data.items.map((e) => data.owners?.[e.domain] === 'berth' ? (
+              <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 opacity-80">
+                <Dot tone="off" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <span className="truncate font-mono">{e.domain}</span><Pill>{e.rtype}</Pill><Pill tone="blue"><Anchor className="size-3" />由 Berth 维护</Pill>
+                  </div>
+                  <div className="text-xs text-muted-foreground">这个域名改由 Berth 更新，Wharf 不再改它；条目只读保留，以后可以改回由 Wharf 维护。</div>
+                </div>
+                <div className="flex">
+                  <Button variant="ghost" size="icon-sm" title="记录" onClick={() => setLog(e)}><History /></Button>
+                  <Button variant="ghost" size="icon-sm" title="删除" onClick={() => del(e)}><Trash2 /></Button>
+                </div>
+              </div>
+            ) : (
               <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
                 <Dot tone={!e.enabled ? 'off' : e.last_err ? 'bad' : e.last_ok ? 'ok' : 'warn'} />
                 <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEdit({ ...e, creds: { ...e.creds }, source: { ...e.source, apis: [...(e.source.apis ?? [])] } })}>
@@ -401,6 +416,31 @@ function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
         )}
       </div>
       {dialog}
+    </Section>
+  )
+}
+
+// BerthDDNS: names both Wharf and Berth keep a record for. One of them should, or the two
+// keep overwriting each other. The router sees the public address first-hand, so Wharf is
+// the suggestion.
+function BerthDDNS({ onChanged }: { onChanged: () => void }) {
+  const { data, reload } = useApi<{ available: boolean; both: string[]; error?: string }>('/berth/ddns')
+  if (!data?.available || !data.both.length) return null
+  const pick = async (domain: string, owner: string) => {
+    try { await post('/berth/ddns', { domain, owner }); toast.success(`${domain} 改由 ${owner === 'wharf' ? 'Wharf' : 'Berth'} 维护`); reload(); onChanged() }
+    catch (e) { toast.error((e as Error).message) }
+  }
+  return (
+    <Section title="和 Berth 重复的域名" desc="Wharf 和 Berth 都在更新这些域名，会互相覆盖。请选一方维护；路由器拿到的公网 IP 最准，建议由 Wharf 维护。" className="mt-4">
+      <div className="divide-y">
+        {data.both.map((d) => (
+          <div key={d} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+            <span className="flex-1 font-mono">{d}</span>
+            <Button size="sm" onClick={() => pick(d, 'wharf')}>由 Wharf 维护（推荐）</Button>
+            <Button size="sm" variant="outline" onClick={() => pick(d, 'berth')}><Anchor /> 由 Berth 维护</Button>
+          </div>
+        ))}
+      </div>
     </Section>
   )
 }

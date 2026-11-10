@@ -102,9 +102,11 @@ func Run(path string) error {
 		}
 	}
 	f := &front{cfg: cfg, routes: map[string]Route{}}
-	for _, r := range cfg.Routes {
+	for _, r := range cfg.Routes { // earlier routes win: nodes, then the panel, then Berth
 		for _, n := range r.SNI {
-			f.routes[strings.ToLower(n)] = r
+			if _, taken := f.routes[strings.ToLower(n)]; !taken {
+				f.routes[strings.ToLower(n)] = r
+			}
 		}
 	}
 	certPEM, keyPEM, err := tlsutil.SelfSigned("localhost", "Wharf")
@@ -233,7 +235,7 @@ func (f *front) handle(c net.Conn) {
 		tc.Close()
 		return
 	}
-	if r, ok := f.routes[name]; ok && (!r.LANOnly || privateClient(c.RemoteAddr())) {
+	if r, ok := f.route(name); ok && (!r.LANOnly || privateClient(c.RemoteAddr())) {
 		f.pipe(replay, c, r)
 		return
 	}
@@ -253,6 +255,18 @@ func (f *front) handle(c net.Conn) {
 	}
 	_ = tc.SetDeadline(time.Time{})
 	f.serveHTTP(tc)
+}
+
+// route finds the route for a server name: exactly, or by a "*.zone" entry one label up.
+func (f *front) route(name string) (Route, bool) {
+	if r, ok := f.routes[name]; ok {
+		return r, true
+	}
+	if _, parent, ok := strings.Cut(name, "."); ok && parent != "" {
+		r, ok := f.routes["*."+parent]
+		return r, ok
+	}
+	return Route{}, false
 }
 
 func (f *front) siteCert(h *tls.ClientHelloInfo) (*tls.Certificate, error) {

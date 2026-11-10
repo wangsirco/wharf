@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Plus, Send, Trash2 } from 'lucide-react'
-import { api, post, put } from '@/lib/api'
+import { Anchor, Check, Plus, Send, Trash2 } from 'lucide-react'
+import { api, get, post, put } from '@/lib/api'
+import { useBerth } from '@/lib/berth'
+import { cn } from '@/lib/utils'
 import { useApi } from '@/lib/hooks'
 import type { Device } from '@/lib/types'
 import { datetime } from '@/lib/format'
@@ -68,6 +70,7 @@ export default function Alerts() {
         <Button variant="outline" size="sm" onClick={() => test()}><Send /> 发送测试消息</Button>
       </PageHeader>
       <div className="grid items-start gap-4 xl:grid-cols-2">
+        <PrimaryNotifier />
         <Section title="推送渠道">
           <div className="divide-y">
             {data?.channels?.map((c) => (
@@ -263,5 +266,30 @@ function SpikeOptions({ rules, setRules, devices }: { rules: Rules; setRules: (r
         <DevicePicker devices={devices} value={rules.spike_exclude ?? []} onChange={(v) => setRules({ ...rules, spike_exclude: v })} />
       </Field>
     </div>
+  )
+}
+
+// PrimaryNotifier: with Berth paired, one side sends every alert so each thing arrives once.
+function PrimaryNotifier() {
+  const berth = useBerth()
+  const [v, setV] = useState<string | null>(null)
+  useEffect(() => { if (berth.paired) get<Record<string, string>>('/settings').then((s) => setV(s['alerts.primary'] || 'wharf')) }, [berth.paired])
+  if (!berth.paired || v === null) return null
+  const pick = async (next: string) => {
+    try { await put('/settings', { 'alerts.primary': next }); setV(next); toast.success(next === 'berth' ? 'Wharf 的告警今后转交给 Berth 发送' : 'Berth 的告警今后由 Wharf 发送') }
+    catch (e) { toast.error((e as Error).message) }
+  }
+  return (
+    <Section title="主通知方" desc={`已和 Berth「${berth.name}」配对。选一方负责发送，另一方的告警转交给它，同一件事只收到一份通知。`} className="xl:col-span-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {([['wharf', 'Wharf 发送', 'Berth 的告警转交到这里，用上面的渠道发出，标题前加「[Berth · 名称]」'], ['berth', 'Berth 发送', 'Wharf 的告警转交给 Berth；Wharf 自己的渠道不再重复发送（审批请求除外，仍由 Wharf 发）']] as const).map(([k, t, d]) => (
+          <button key={k} type="button" onClick={() => pick(k)}
+            className={cn('grid gap-1 rounded-xl border p-3 text-left transition-colors hover:border-primary/50', v === k && 'border-primary bg-accent/50 ring-2 ring-primary/20')}>
+            <span className="flex items-center gap-2 text-sm font-medium">{k === 'berth' && <Anchor className="size-4 text-primary" />}{t}{v === k && <Check className="ml-auto size-4 text-primary" />}</span>
+            <span className="text-xs text-muted-foreground">{d}</span>
+          </button>
+        ))}
+      </div>
+    </Section>
   )
 }

@@ -55,7 +55,9 @@ type Forward struct {
 	OwnerName  string   `json:"owner_name"`
 	Editable   bool     `json:"editable"`
 	Created    int64    `json:"created"`
-	Kind       string   `json:"kind,omitempty"` // "proxy": a proxy node's port, managed on the proxy page
+	Kind       string   `json:"kind,omitempty"`       // "proxy": a proxy node's port, managed on the proxy page; "berth": made by Berth
+	BerthRef   string   `json:"berth_ref,omitempty"`  // the Berth site it belongs to, e.g. site:vault.example.net
+	BerthHost  string   `json:"berth_host,omitempty"` // the Berth host's name on Berth's side
 }
 
 func optStr(s Section, k string) string {
@@ -154,6 +156,9 @@ func (st *fwState) forward(id string) *Forward {
 		}
 		f.Regions, f.Allow, f.Deny = optList(m, "region"), optList(m, "allow"), optList(m, "deny")
 		f.Created, _ = strconv.ParseInt(optStr(m, "created"), 10, 64)
+		if optStr(m, "kind") == berthKind {
+			f.Kind, f.BerthRef, f.BerthHost = berthKind, optStr(m, "berth_ref"), optStr(m, "berth_host")
+		}
 	}
 	return f
 }
@@ -192,10 +197,13 @@ func (a *App) handleForwards(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		f.OwnerID = a.owner("firewall", id)
-		if u.Role != RoleSuper && f.OwnerID != u.ID {
+		if u.Role != RoleSuper && f.OwnerID != u.ID && f.Kind != berthKind { // Berth's mappings are visible to all, read-only
 			continue
 		}
 		f.OwnerName = names[f.OwnerID]
+		if f.Kind == berthKind {
+			f.OwnerName = "Berth"
+		}
 		v, ok := byMAC[strings.ToLower(f.DeviceMAC)]
 		if !ok {
 			v, ok = byIP[f.LanIP]
@@ -204,7 +212,7 @@ func (a *App) handleForwards(w http.ResponseWriter, r *http.Request) {
 			f.DeviceNow, f.VMTag = v.name, v.tag
 			f.Online = &v.online
 		}
-		f.Editable = u.Can("forwards.manage") && a.canTouch(u, "firewall", id) && f.Kind == ""
+		f.Editable = u.Can("forwards.manage") && a.canTouch(u, "firewall", id) && (f.Kind == "" || (f.Kind == berthKind && u.Role == RoleSuper))
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool { return portNum(out[i].WanPort) < portNum(out[j].WanPort) })
@@ -449,6 +457,9 @@ func prepareForward(a *App, u *User, raw json.RawMessage) (string, error) {
 		}
 		if f.Kind == proxyKind {
 			return "", errors.New("这是代理节点的端口，请在「代理」页面管理")
+		}
+		if f.Kind == berthKind && u.Role != RoleSuper {
+			return "", errors.New("这是 Berth 管理的映射，建议在 Berth 里操作")
 		}
 		if f.Rev != req.Rev {
 			return "", errors.New("该规则在路由器上已被修改，请刷新后重试")
@@ -731,6 +742,22 @@ func runForward(a *App, ac actor, raw json.RawMessage) (any, error) {
 	if req.Wan == "" {
 		delete(meta, "wan")
 	}
+	// Berth's mappings carry where they came from; a super admin's edit keeps that
+	if ac.berth != nil {
+		meta["kind"], meta["berth_link"] = berthKind, strconv.FormatInt(ac.berth.link.ID, 10)
+		if ac.berth.fwdRef != "" {
+			meta["berth_ref"] = ac.berth.fwdRef
+		}
+		if ac.berth.fwdHost != "" {
+			meta["berth_host"] = ac.berth.fwdHost
+		}
+	} else if before.Meta != nil && optStr(before.Meta, "kind") == berthKind {
+		for _, k := range []string{"kind", "berth_ref", "berth_host", "berth_link"} {
+			if v := optStr(before.Meta, k); v != "" {
+				meta[k] = v
+			}
+		}
+	}
 	entries, match, err := a.setEntries(id, req.Mode, req.Regions, req.Allow, req.Deny)
 	if err != nil {
 		return nil, err
@@ -748,7 +775,12 @@ func runForward(a *App, ac actor, raw json.RawMessage) (any, error) {
 	}
 	after, _ := a.loadFwState()
 	req.ID = map[bool]string{true: "", false: id}[before.Redirect == nil]
-	a.audit(ac, "forward.save", "forward", id, forwardSummary(req), nilIfEmpty(before), nilIfEmpty(after.snap(id)), true)
+	summary := forwardSummary(req)
+	if ac.berth != nil {
+		summary = ac.berth.summary(summary)
+	}
+	a.audit(ac, "forward.save", "forward", id, summary, nilIfEmpty(before), nilIfEmpty(after.snap(id)), true)
+	a.notifyBerthForward(ac, before, id, "modified")
 	return map[string]string{"id": id}, nil
 }
 
@@ -780,6 +812,9 @@ func prepareForwardRef(a *App, u *User, raw json.RawMessage, verb string) (*Forw
 	}
 	if f.Kind == proxyKind {
 		return nil, errors.New("这是代理节点的端口，请在「代理」页面管理")
+	}
+	if f.Kind == berthKind && u.Role != RoleSuper {
+		return nil, errors.New("这是 Berth 管理的映射，建议在 Berth 里操作")
 	}
 	if f.Rev != req.Rev {
 		return nil, errors.New("该规则在路由器上已被修改，请刷新后重试")
@@ -818,7 +853,12 @@ func runForwardDelete(a *App, ac actor, raw json.RawMessage) (any, error) {
 	if err := a.applyForward(req.ID, before, nil, nil, nil, "", nil); err != nil {
 		return nil, err
 	}
-	a.audit(ac, "forward.delete", "forward", req.ID, "删除端口转发 "+describe(f), before, nil, true)
+	summary := "删除端口转发 " + describe(f)
+	if ac.berth != nil {
+		summary = ac.berth.summary(summary)
+	}
+	a.audit(ac, "forward.delete", "forward", req.ID, summary, before, nil, true)
+	a.notifyBerthForward(ac, before, req.ID, "deleted")
 	return nil, nil
 }
 
@@ -850,6 +890,7 @@ func runForwardToggle(a *App, ac actor, raw json.RawMessage) (any, error) {
 	}
 	after, _ := a.loadFwState()
 	a.audit(ac, "forward.toggle", "forward", req.ID, summary, before, after.snap(req.ID), true)
+	a.notifyBerthForward(ac, before, req.ID, map[bool]string{true: "enabled", false: "disabled"}[req.Enabled])
 	return nil, nil
 }
 
@@ -906,4 +947,13 @@ func init() {
 		Prepare: prepareForwardToggle, Run: runForwardToggle})
 	registerAction(&Action{Key: "forward.delete", Label: "删除端口转发", Perm: "forwards.manage",
 		Prepare: prepareForwardDelete, Run: runForwardDelete})
+}
+
+// notifyBerthForward: a super admin changed one of Berth's mappings in Wharf; Berth marks
+// the site "changed outside Berth".
+func (a *App) notifyBerthForward(ac actor, before fwdSnap, id, what string) {
+	if ac.berth != nil || before.Meta == nil || optStr(before.Meta, "kind") != berthKind {
+		return
+	}
+	a.berthNotify("forward.changed", map[string]any{"id": id, "berth_ref": optStr(before.Meta, "berth_ref"), "change": what, "by": ac.user.DisplayName})
 }

@@ -302,7 +302,7 @@ func (a *App) proxyApply(nodes []*ProxyNode, users []*ProxyUser, ps proxySetting
 			}
 		}
 	}
-	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb, port == 443, a.panelFrontRoute())
+	front, frontOn := buildFront(nodes, ps.Site, ps.ACMEEmail, fb, port == 443, a.panelFrontRoute(), a.berthSNI())
 	if frontOn && len(owners443) > 0 && mode == "" {
 		return fmt.Errorf("WAN %d 已转发给「%s」。要共用这个端口，请在「扩展设置」里选择共用方式，或者让节点用独立端口", port, displayRule(fw[owners443[0]], nil))
 	}
@@ -675,6 +675,9 @@ func (a *App) handleProxy(w http.ResponseWriter, r *http.Request) {
 		"ext": ext, "nodes": nodes, "users": users, "host": a.proxyHost(ps),
 		"quota": map[string]any{"nodes": u.Quota("max_proxy_nodes"), "users": u.Quota("max_proxy_users")},
 		"front": map[string]any{"port": proxyFrontPort, "site_domain": ps.Site.Domain, "share_port": ps.port(), "firewall": a.firewallFlavor()},
+	}
+	if reg := a.berthSNI(); reg != nil {
+		out["berth_sni"] = reg
 	}
 	if u.Role == RoleSuper {
 		if fw, err := a.agent.UciConfig("firewall"); err == nil {
@@ -1433,7 +1436,7 @@ func (a *App) handleProxyLinks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, l)
 	}
 	sub, selfSigned := "", false
-	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil, ps.port() == 443, nil); on {
+	if _, on := buildFront(nodes, ps.Site, ps.ACMEEmail, nil, ps.port() == 443, nil, nil); on {
 		subHost := firstNonEmpty(ps.Site.Domain, host)
 		sub = "https://" + subHost + "/sub/" + p.SubToken
 		if ps.port() != 443 {

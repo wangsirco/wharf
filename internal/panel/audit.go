@@ -34,8 +34,9 @@ type AuditEntry struct {
 type actor struct {
 	user       *User
 	ip         string
-	approvalID int64 // >0 if executed after super-admin approval
-	restoreOf  int64 // >0 if this is a restore of another audit entry
+	approvalID int64     // >0 if executed after super-admin approval
+	restoreOf  int64     // >0 if this is a restore of another audit entry
+	berth      *berthReq // set when the paired Berth made the call (berth.go)
 }
 
 func (a *App) audit(ac actor, action, targetType, targetID, summary string, before, after any, restorable bool) int64 {
@@ -103,6 +104,9 @@ func (a *App) handleAuditList(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("user_id"); v != "" {
 		conds = append(conds, "user_id=?")
 		args = append(args, v)
+	}
+	if q.Get("source") == "berth" {
+		conds = append(conds, "username LIKE 'Berth（%'")
 	}
 	if v := q.Get("action"); v != "" {
 		conds = append(conds, "action LIKE ?")

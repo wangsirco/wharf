@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import qrcode from 'qrcode-generator'
 import {
-  ArrowDown, ArrowUp, Ban, Download, Globe2, KeyRound, Link2, Loader2, MapPin, Pencil, Plus, QrCode, RefreshCw, Search,
+  Anchor, ArrowDown, ArrowUp, Ban, Download, Globe2, KeyRound, Link2, Loader2, MapPin, Pencil, Plus, QrCode, RefreshCw, Search,
   Server, ShieldCheck, Trash2, Users as UsersIcon, Zap,
 } from 'lucide-react'
 import { api, post } from '@/lib/api'
@@ -54,6 +54,7 @@ interface ProxyResp {
   ext: Ext; nodes: PNode[]; users: PUser[]; host: string; quota: { nodes: number; users: number }
   front: { port: number; site_domain: string; share_port?: number; firewall?: string }; settings?: Settings; site_html?: string; certs?: Cert[] | null
   port443?: { forward: string; target: string; adopted: boolean }
+  berth_sni?: { target: string; domains: string[]; proxy_protocol: boolean }
 }
 interface Rate { up: number; down: number }
 interface OnlineIP { ip: string; seen: number; country: string; city: string; as_org: string; nodes: number[] | null }
@@ -858,6 +859,7 @@ function ExtSettings({ data, reload }: { data: ProxyResp; reload: () => void }) 
             <div><Button size="sm" disabled={!tag || tag === ext.version || ext.job.running} onClick={switchTo}><RefreshCw /> 切换到 {tag || '…'}</Button></div>
           </div>
         </Section>
+        <SNIRoutes data={data} />
         {!!data.certs?.length && (
           <Section title="证书">
             <div className="divide-y">
@@ -1002,5 +1004,29 @@ function OnePanelCard({ target }: { target: string }) {
         </div>
       )}
     </div>
+  )
+}
+
+// SNIRoutes: who gets which name on the shared port, in the front's order of priority.
+function SNIRoutes({ data }: { data: ProxyResp }) {
+  const nodes = data.nodes.filter((n) => n.enabled && n.entry === 'sni')
+  const b = data.berth_sni
+  if (!b?.domains.length) return null // without Berth the node list already shows this
+  return (
+    <Section title={`${data.front.share_port ?? 443} 分流去向`} desc="同一个名字只归一方，优先级：代理节点 > Berth > 1Panel 网站 > 伪装站点。">
+      <div className="divide-y text-sm">
+        {nodes.map((n) => (
+          <div key={n.id} className="flex flex-wrap items-center gap-2 px-4 py-2">
+            <Pill tone="blue">代理节点</Pill><span className="font-mono">{n.security === 'reality' ? (n.params.server_names ?? []).join(', ') : n.domain}</span>
+            <span className="ml-auto text-xs text-muted-foreground">{n.name}</span>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+          <Pill tone="blue"><Anchor className="size-3" />Berth</Pill>
+          <span className="font-mono">{b.domains.join(', ')}</span>
+          <span className="ml-auto text-xs text-muted-foreground">原样转给 {b.target}{b.proxy_protocol ? '（带 PROXY 协议）' : ''} · 证书由 Berth 负责</span>
+        </div>
+      </div>
+    </Section>
   )
 }

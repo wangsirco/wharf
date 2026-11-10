@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Ban, Pin, RefreshCw, Search, ShieldCheck } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
+import { useBerth } from '@/lib/berth'
 import { runAction } from '@/lib/actions'
 import { useLive } from '@/lib/live'
 import { get } from '@/lib/api'
@@ -39,6 +40,7 @@ function statusText(d: Device) {
 export default function Devices() {
   const { data, error, reload } = useApi<Device[]>('/devices', 10000)
   const { can } = useAuth()
+  const berth = useBerth()
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('online')
   const [sort, setSort] = useState<'ip' | 'speed'>('speed')
@@ -108,6 +110,7 @@ export default function Devices() {
                       <div className="flex items-center gap-1.5">
                         <span className={d.name ? 'truncate font-medium' : 'text-muted-foreground'}>{d.name || '未知设备'}</span>
                         <VMTag tag={d.vm_tag} />
+                        {berth.hosts?.includes(d.ip) && <Pill tone="blue">Berth 主机</Pill>}
                         {d.is_new && <Pill tone="amber">新</Pill>}
                       </div>
                       <div className="hidden truncate font-mono text-[11px] text-muted-foreground md:block">{d.mac}{d.vendor ? ` · ${d.vendor}` : d.random_mac ? ' · 隐私 MAC' : ''}</div>

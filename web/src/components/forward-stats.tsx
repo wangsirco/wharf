@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Info, Lock, RefreshCw, XCircle } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
+import { useAuth } from '@/lib/auth'
+import { BanDialog } from '@/components/bans'
 import type { Forward } from '@/lib/types'
 import { ago, bytes, datetime, duration } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -60,6 +62,8 @@ export function ForwardStats({ f, onClose }: { f: Forward | null; onClose: () =>
   const [filter, setFilter] = useState('all')
   const { data, error } = useApi<Stats>(f ? `/forwards/${f.id}/stats?range=${range}${refresh ? `&refresh=1&n=${refresh}` : ''}` : null, 30000)
   const s = data && data.forward.id === f?.id ? data : null
+  const { isSuper } = useAuth()
+  const [ban, setBan] = useState<{ ip: string; reason: string } | null>(null)
   const remotes = (s?.remotes ?? []).filter((r) => filter === 'all' || (filter === 'real' ? ['user', 'bulk'].includes(r.verdict) : filter === 'bad' ? ['brute', 'probe', 'scanner'].includes(r.verdict) : true))
   const title = f ? (f.managed ? f.device_now || f.device_name || f.lan_ip : f.name || f.id) : ''
   return (
@@ -146,6 +150,7 @@ export function ForwardStats({ f, onClose }: { f: Forward | null; onClose: () =>
                           {r.long > 0 && <span>长会话 {r.long}</span>}
                           {r.secs > 0 && <span>共 {dur(r.secs)}</span>}
                           <span>{ago(r.last)}</span>
+                          {isSuper && <button type="button" className="text-destructive hover:underline" onClick={() => setBan({ ip: r.ip, reason: `${label} · WAN ${f?.wan_port ?? ''}` })}>封禁</button>}
                         </div>
                       </div>
                     )
@@ -171,6 +176,7 @@ export function ForwardStats({ f, onClose }: { f: Forward | null; onClose: () =>
           )}
         </div>
       )}
+      <BanDialog open={!!ban} onOpenChange={(o) => { if (!o) setBan(null) }} ip={ban?.ip} reason={ban?.reason} />
     </HalfPanel>
   )
 }

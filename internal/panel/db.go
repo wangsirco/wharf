@@ -193,6 +193,17 @@ var migrations = []string{
 	 CREATE INDEX passkeys_user ON passkeys(user_id)`,
 	// v19: how each user signs in (password | two_step | passkey)
 	`ALTER TABLE users ADD COLUMN login_mode TEXT NOT NULL DEFAULT 'password'`,
+	// v20: Berth integration (berth.go): the pairing, user mapping, bans, DDNS ownership, nonces
+	`CREATE TABLE berth_link (id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, cert_fp TEXT NOT NULL, token_hash TEXT NOT NULL,
+		outbound_token_enc TEXT NOT NULL, sign_key_enc TEXT NOT NULL, scopes TEXT NOT NULL, target_devices TEXT NOT NULL, expires_at INTEGER,
+		created_at INTEGER NOT NULL, last_seen_at INTEGER, wharf_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active',
+		last_error TEXT NOT NULL DEFAULT '');
+	 CREATE UNIQUE INDEX berth_link_token ON berth_link(token_hash);
+	 CREATE TABLE berth_user_map (berth_user TEXT PRIMARY KEY, wharf_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE);
+	 CREATE TABLE berth_bans (id INTEGER PRIMARY KEY, cidr TEXT NOT NULL, reason TEXT, source TEXT, expires_at INTEGER, created_at INTEGER NOT NULL,
+		origin TEXT NOT NULL DEFAULT 'berth', sync INTEGER NOT NULL DEFAULT 0, remote_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '');
+	 CREATE TABLE ddns_owner (domain TEXT PRIMARY KEY, owner TEXT NOT NULL CHECK (owner IN ('wharf','berth')));
+	 CREATE TABLE berth_nonce (nonce TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

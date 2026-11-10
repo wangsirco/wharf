@@ -220,6 +220,9 @@ func (a *App) inQuiet(r AlertRules, t time.Time) bool {
 
 // notify sends to every enabled channel and logs the result. urgent alerts ignore quiet hours.
 func (a *App) notify(kind, title, body string, urgent bool) {
+	if a.forwardAlertToBerth(kind, title, body, urgent) { // Berth is the main notifier (berth_api.go)
+		return
+	}
 	if !slices.ContainsFunc(a.alertChannels(false), func(c AlertChannel) bool { return c.Enabled }) {
 		return // nowhere to send: no log entry either
 	}

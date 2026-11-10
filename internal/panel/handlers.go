@@ -161,6 +161,48 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/geo/update", a.super(a.handleGeoUpdate))
 	m.HandleFunc("POST /api/rules/update", a.super(a.handleRulesUpdate))
 
+	// Berth integration: the session side (berth.go, berth_bans.go)
+	m.HandleFunc("GET /api/berth/status", a.auth("", a.handleBerthStatus))
+	m.HandleFunc("POST /api/berth/sso", a.auth("", a.handleBerthSSOOut))
+	m.HandleFunc("GET /api/berth/host/{ip}", a.auth("devices.view", a.handleBerthHost))
+	m.HandleFunc("GET /api/berth", a.super(a.handleBerth))
+	m.HandleFunc("PUT /api/berth", a.super(a.handleBerthUpdate))
+	m.HandleFunc("GET /api/berth/pair/preview", a.super(a.handleBerthPairPreview))
+	m.HandleFunc("POST /api/berth/pair/approve", a.super(a.handleBerthPairApprove))
+	m.HandleFunc("POST /api/berth/rotate", a.super(a.handleBerthRotate))
+	m.HandleFunc("POST /api/berth/unpair", a.super(a.handleBerthUnpair))
+	m.HandleFunc("PUT /api/berth/users", a.super(a.handleBerthUserMap))
+	m.HandleFunc("GET /api/berth/ddns", a.super(a.handleBerthDDNSCompare))
+	m.HandleFunc("POST /api/berth/ddns", a.super(a.handleBerthDDNSOwner))
+	m.HandleFunc("GET /api/bans", a.super(a.handleBans))
+	m.HandleFunc("POST /api/bans", a.super(a.handleBanAdd))
+	m.HandleFunc("PUT /api/bans/{id}/sync", a.super(a.handleBanSync))
+	m.HandleFunc("DELETE /api/bans/{id}", a.super(a.handleBanDelete))
+	m.HandleFunc("GET /sso/berth", a.handleBerthSSO)
+	// ... and what Berth calls (token + signature, no session; berth_api.go)
+	m.HandleFunc("POST /api/ext/berth/v1/pair/exchange", a.handleBerthExchange)
+	m.HandleFunc("POST /api/ext/berth/v1/unpair", a.berthAPI("", a.handleBerthExtUnpair))
+	m.HandleFunc("GET /api/ext/berth/v1/ping", a.berthAPI("", a.handleBerthPing))
+	m.HandleFunc("POST /api/ext/berth/v1/events", a.berthAPI("", a.handleBerthEvent))
+	m.HandleFunc("GET /api/ext/berth/v1/forwards", a.berthAPI("forwards", a.handleBerthForwards))
+	m.HandleFunc("POST /api/ext/berth/v1/forwards", a.berthAPI("forwards", a.handleBerthForwardCreate))
+	m.HandleFunc("PUT /api/ext/berth/v1/forwards/{id}", a.berthAPI("forwards", a.handleBerthForwardUpdate))
+	m.HandleFunc("DELETE /api/ext/berth/v1/forwards/{id}", a.berthAPI("forwards", a.handleBerthForwardDelete))
+	m.HandleFunc("GET /api/ext/berth/v1/sni", a.berthAPI("sni", a.handleBerthSNIGet))
+	m.HandleFunc("PUT /api/ext/berth/v1/sni", a.berthAPI("sni", a.handleBerthSNIPut))
+	m.HandleFunc("GET /api/ext/berth/v1/ddns", a.berthAPI("ddns", a.handleBerthDDNS))
+	m.HandleFunc("POST /api/ext/berth/v1/ddns/claim", a.berthAPI("ddns", a.handleBerthDDNSClaim))
+	m.HandleFunc("POST /api/ext/berth/v1/ddns/{id}/run", a.berthAPI("ddns", a.handleBerthDDNSRun))
+	m.HandleFunc("GET /api/ext/berth/v1/devices", a.berthAPI("devices.read", a.handleBerthDevices))
+	m.HandleFunc("GET /api/ext/berth/v1/hosts/{ip}/traffic", a.berthAPI("traffic.read", a.handleBerthHostTraffic))
+	m.HandleFunc("GET /api/ext/berth/v1/hosts/{ip}/inbound", a.berthAPI("traffic.read", a.handleBerthHostInbound))
+	m.HandleFunc("GET /api/ext/berth/v1/bans", a.berthAPI("bans", a.handleBerthBans))
+	m.HandleFunc("POST /api/ext/berth/v1/bans", a.berthAPI("bans", a.handleBerthBanAdd))
+	m.HandleFunc("DELETE /api/ext/berth/v1/bans/{id}", a.berthAPI("bans", a.handleBerthBanDelete))
+	m.HandleFunc("POST /api/ext/berth/v1/alerts", a.berthAPI("alerts", a.handleBerthAlert))
+	m.HandleFunc("POST /api/ext/berth/v1/sso/ticket", a.berthAPI("sso", a.handleBerthSSOTicket))
+	m.HandleFunc("/api/ext/", func(w http.ResponseWriter, r *http.Request) { jsonErr(w, 404, "not found") })
+
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { jsonErr(w, 404, "not found") })
 	m.HandleFunc("/", a.handleStatic)
 	return a.securityHeaders(a.accessGate(a.demoWrap(m)))
@@ -585,6 +627,16 @@ func validSetting(key, value string) error {
 		return err
 	}
 	switch key {
+	case "alerts.primary":
+		if value != "wharf" && value != "berth" {
+			return fmt.Errorf("主通知方只能是 wharf 或 berth")
+		}
+		return nil
+	case "bans.default_sync_to_berth":
+		if value != "0" && value != "1" {
+			return fmt.Errorf("只能是 0 或 1")
+		}
+		return nil
 	case "ui.name", "ui.subtitle":
 		v := strings.TrimSpace(value)
 		max := map[string]int{"ui.name": 24, "ui.subtitle": 40}[key]

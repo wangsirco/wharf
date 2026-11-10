@@ -30,6 +30,7 @@ import SystemPage from '@/pages/system'
 import Tools from '@/pages/tools'
 import ProxyPage from '@/pages/proxy'
 import DDNSPage from '@/pages/ddns'
+import PairBerth from '@/pages/pair-berth'
 
 function Home() {
   const { can } = useAuth()
@@ -82,6 +83,7 @@ function Routed() {
         <Route path="audit" element={superOnly(<Audit />)} />
         <Route path="visitors" element={superOnly(<Visitors />)} />
         <Route path="settings" element={superOnly(<SettingsPage />)} />
+        <Route path="pair/berth" element={superOnly(<PairBerth />)} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -65,7 +65,9 @@ export interface Forward {
   enabled: boolean; managed: boolean; device_name: string; device_now?: string; vm_tag?: string; online?: boolean; device_mac: string; note: string
   mode: 'all' | 'restrict'; regions: string[]; allow: string[]; deny: string[]
   owner_id: number; owner_name: string; editable: boolean; created: number
-  kind?: 'proxy' // a proxy node's port, managed on the proxy page
+  kind?: 'proxy' | 'berth' // proxy: a proxy node's port (proxy page); berth: made by the paired Berth
+  berth_ref?: string
+  berth_host?: string
 }
 
 export interface PortGrant { wan: string; from: number; to: number }

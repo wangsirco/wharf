@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowDown, ArrowLeft, ArrowUp, Ban, Clock, House, LogOut, Pencil, Pin, Radar, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import { Anchor, ArrowDown, ArrowLeft, ArrowUp, Ban, Clock, House, LogOut, Pencil, Pin, Radar, Search, ShieldCheck, Sparkles } from 'lucide-react'
 import { get, post } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
+import { useBerth } from '@/lib/berth'
+import { BerthHostTab } from '@/components/berth-host'
 import type { Catalog, Device, LiveHost, ProfileResp, Probe, RemoteRow, TrafficResp } from '@/lib/types'
 import { ago, bitrate, bytes, datetime } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -45,6 +47,8 @@ export default function DevicePage() {
   const [tab, setTab] = useState(params.get('tab') ?? (can('traffic.view') ? 'profile' : 'live'))
   const [edit, setEdit] = useState<Device | null>(null)
   const [info, setInfo] = useState(false)
+  const berth = useBerth()
+  const berthHost = !!d?.ip && berth.paired && berth.state === 'active' && !!berth.hosts?.includes(d.ip)
 
   return (
     <>
@@ -55,6 +59,7 @@ export default function DevicePage() {
           <div className="flex items-center gap-2">
             <h1 className="truncate text-xl font-semibold tracking-tight">{devName(d) || (devices ? '未知设备' : '…')}</h1>
             <VMTag tag={d?.vm_tag} />
+            {berthHost && <Pill tone="blue"><Anchor className="size-3" />Berth 主机</Pill>}
             {d?.is_new && <Pill tone="amber">新设备</Pill>}
             {d?.blocked && <Pill tone="red"><Ban className="size-3" />{d.blocked_by === 'schedule' ? '定时断网中' : '已断网'}</Pill>}
             {d && can('devices.manage') && <Button variant="ghost" size="icon-sm" title="修改名称 / 类型" onClick={() => setInfo(true)}><Pencil /></Button>}
@@ -82,6 +87,7 @@ export default function DevicePage() {
           {can('traffic.view') && <TabsTrigger value="profile">设备画像</TabsTrigger>}
           {can('traffic.view') && <TabsTrigger value="remotes">访问明细</TabsTrigger>}
           {can('access.manage') && <TabsTrigger value="control">访问控制</TabsTrigger>}
+          {berthHost && <TabsTrigger value="berth">Berth</TabsTrigger>}
         </TabsList>
       </Tabs>
       {tab === 'live' && <LiveTab mac={mac} />}
@@ -89,6 +95,7 @@ export default function DevicePage() {
       {tab === 'profile' && <ProfileTab mac={mac} />}
       {tab === 'remotes' && <RemotesTab mac={mac} />}
       {tab === 'control' && <PolicyEditor mac={mac} name={devName(d)} />}
+      {tab === 'berth' && berthHost && d?.ip && <BerthHostTab ip={d.ip} />}
       <DevicePanel device={edit} onClose={() => setEdit(null)} canManage={can('devices.manage')} onSaved={() => { setEdit(null); reload() }} />
       {d && <InfoDialog open={info} device={d} onClose={() => setInfo(false)} onSaved={() => { setInfo(false); reload() }} />}
     </>

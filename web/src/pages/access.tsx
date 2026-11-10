@@ -8,6 +8,7 @@ import type { ForwardTarget } from '@/lib/types'
 import { PageHeader } from '@/components/layout'
 import { Field, Section, useConfirm } from '@/components/common'
 import { DevicePicker, IPListInput, RegionPicker } from '@/components/pickers'
+import { ExternalBans } from '@/components/bans'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -128,6 +129,7 @@ export default function Access() {
             <Switch checked={d['access.ipsb'] === '1'} onCheckedChange={(c) => setD({ ...d, 'access.ipsb': c ? '1' : '0' })} />
           </label>
         </Section>
+        <ExternalBans />
       </div>
       {dialog}
     </>

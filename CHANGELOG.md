@@ -1,5 +1,14 @@
 # Changelog · 更新日志
 
+## 0.19.0 — Berth integration · 与 Berth 泊位联动
+
+- Pairing with Berth (the server panel of the same series): the super admin agrees on Wharf to the scopes, lifetime and Berth host(s); both sides then hold a token for the other, every call is signed (time window, nonce) and pinned to the certificate fingerprint taken at pairing. Narrow scopes, rotate tokens or unpair (keep or delete Berth's mappings) under Settings → 集成. Protocol in docs/BERTH.md · 与 Berth 配对，签名对接通道
+- Berth creates, changes and removes its own port mappings on its hosts (with a dry-run preview); they carry a Berth badge that opens the site in Berth; admins see them read-only, a super admin's change is reported back · Berth 管理自己的端口映射，带徽标
+- 443 by name: Berth registers its domains with the SNI front, passed through untouched (optionally with PROXY protocol); proxy nodes and the panel's names keep priority; `*.zone` names supported · 443 分流可登记 Berth 的域名
+- DDNS: one side keeps each name; Berth can ask Wharf to keep a new name with the account of the same zone; names both sides update are flagged for a choice · DDNS 由一方维护
+- External bans dropped at the WAN (router and forwards, LAN unaffected), from Berth or made here, optionally synced to Berth per ban; a ban button in a forward's connection list · 外部封禁与封禁同步
+- One main notifier for alerts (Wharf or Berth), deduplicated; sign-in without a password in both directions via one-time tickets and a Berth → Wharf user mapping; Berth hosts tagged on the device pages with their sites, containers and VMs; audit filter for Berth · 主通知方、互相免登录跳转、设备页 Berth 标签页
+
 ## 0.18.3 — Cloudflare account, public panel access, clearer alerts · Cloudflare 账户、面板公网访问、告警排版
 
 - Cloudflare account for DDNS: one-click token page with the permissions chosen, then pick a domain, add or take over records; plans plus custom check / forced-refresh intervals (up to 7 days) · DDNS 连接 Cloudflare 账户，快速方案与自定义
