@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NetBanner } from '@/components/net-banner'
 import {
-  Anchor,
-  Activity, ArrowLeftRight, BarChart3, Ban, BellRing, Earth, ShieldAlert, Search as SearchIcon, ClipboardCheck, Globe, LayoutDashboard, ShieldHalf, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Users, X, KeyRound, Inbox, Wrench, Cpu, Sparkles, ArrowUpCircle, Rocket, Waypoints,
+  Activity, Anchor, ArrowLeftRight, ArrowUpCircle, Ban, BarChart3, BellRing, BrickWall, ClipboardCheck, Cpu, Earth, Globe, Inbox, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, Network, Puzzle, Rocket, ScrollText, Search as SearchIcon, Server, Settings, ShieldAlert, ShieldHalf, Sparkles, Sun, Users, Waypoints, Wrench, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth'
@@ -38,6 +38,15 @@ const nav: { title?: string; items: NavItem[] }[] = [
       { to: '/tools', label: '网络工具', icon: Wrench, perm: 'tools.diag|tools.capture|tools.wol|system.view' },
       { to: '/system', label: '系统维护', icon: Cpu, perm: 'system.view' },
       { to: '/requests', label: '我的申请', icon: Inbox },
+    ],
+  },
+  {
+    title: '路由器',
+    items: [
+      { to: '/interfaces', label: '网络接口', icon: Network, perm: 'network.view' },
+      { to: '/dhcp', label: 'DHCP 与 DNS', icon: Server, perm: 'network.view' },
+      { to: '/firewall', label: '防火墙', icon: BrickWall, perm: 'network.view' },
+      { to: '/plugins', label: '插件', icon: Puzzle, perm: 'plugins.view' },
     ],
   },
   {
@@ -161,6 +170,7 @@ export function Layout() {
           <ModeSwitch />
           <UserMenu />
         </header>
+        <NetBanner />
         <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6">
           <ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary>
         </main>

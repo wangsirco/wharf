@@ -31,6 +31,11 @@ import Tools from '@/pages/tools'
 import ProxyPage from '@/pages/proxy'
 import DDNSPage from '@/pages/ddns'
 import PairBerth from '@/pages/pair-berth'
+import Interfaces from '@/pages/interfaces'
+import DHCPPage from '@/pages/dhcp'
+import FirewallPage from '@/pages/firewall'
+import PluginsPage from '@/pages/plugins'
+import PluginPage from '@/pages/plugin'
 
 function Home() {
   const { can } = useAuth()
@@ -84,6 +89,11 @@ function Routed() {
         <Route path="visitors" element={superOnly(<Visitors />)} />
         <Route path="settings" element={superOnly(<SettingsPage />)} />
         <Route path="pair/berth" element={superOnly(<PairBerth />)} />
+        <Route path="interfaces" element={<Interfaces />} />
+        <Route path="dhcp" element={<DHCPPage />} />
+        <Route path="firewall" element={<FirewallPage />} />
+        <Route path="plugins" element={<PluginsPage />} />
+        <Route path="plugins/:pkg" element={<PluginPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

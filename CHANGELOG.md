@@ -1,5 +1,16 @@
 # Changelog · 更新日志
 
+## 0.20.0 — Interfaces, DHCP / DNS, firewall and plugins · 网络接口、DHCP / DNS、防火墙与插件
+
+- Network interfaces page: online state and public IP (direct / behind a modem / CGNAT), a card per LAN / WAN / WAN6 / extra interface with addresses, link, traffic, zone and mwan3 state; restart, stop, edit (DHCP, static, PPPoE, DHCPv6 …), add WAN2 or delete; physical ports and outage history · 网络接口页：公网 IP、各接口状态、重启与设置
+- Apply-then-confirm for interface and firewall changes: kept only when confirmed within 90 s (4 min for a new LAN address), otherwise — or after a restart in between — the router restores the previous configuration · 接口 / 防火墙改动不确认就自动恢复
+- Outage diagnosis (cable → address → ISP gateway → internet → DNS → web, with a verdict: home, account, ISP or DNS / proxy) and a red "外网断了" bar on every page · 断网诊断与全局断网提示
+- DHCP and DNS page: pools, upstream DNS (recognises NextDNS, SmartDNS, OpenClash …), rebind protection, static leases with clash checks, current leases · DHCP 与 DNS 页
+- Firewall page: defaults, zones and zone forwarding, traffic rules; clean-up of zones listing missing interfaces; Wharf's own rules read-only · 防火墙页
+- Plugins: every installed LuCI app with state, processes and ports (open a port to the WAN in one click), warnings for clashing proxy / DNS plugins; each plugin's settings pages redrawn in Wharf's design and editable — Lua pages via LuCI's own parser, JavaScript pages in a sandbox · 插件兼容层：插件设置页换成 Wharf 样式
+- Plugin store on the router's opkg feeds with a dry-run compatibility check (dependencies, architecture, space, clashes) before installing · 插件商店，安装前检查兼容性
+- New permissions `network.view`, `network.manage`, `firewall.manage`, `plugins.view`, `plugins.manage`, `plugins.install` · 新权限可单独授予
+
 ## 0.19.0 — Berth integration · 与 Berth 泊位联动
 
 - Pairing with Berth (the server panel of the same series): the super admin agrees on Wharf to the scopes, lifetime and Berth host(s); both sides then hold a token for the other, every call is signed (time window, nonce) and pinned to the certificate fingerprint taken at pairing. Narrow scopes, rotate tokens or unpair (keep or delete Berth's mappings) under Settings → 集成. Protocol in docs/BERTH.md · 与 Berth 配对，签名对接通道

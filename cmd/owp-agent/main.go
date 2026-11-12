@@ -107,6 +107,7 @@ func main() {
 	handler := agent.NewServer(agent.Config{Listen: *listen, KeyID: *keyID, Secret: *secret, AllowFrom: strings.Fields(*allow), DataDir: *dataDir})
 	// OWP_COLLECT=0 runs an API-only instance (testing) that never touches the firewall
 	if def("collect", "1") == "1" && os.Getenv("OWP_COLLECT") != "0" {
+		agent.RecoverPending() // an unconfirmed interface / firewall change from before a restart goes back
 		handler.Traffic = agent.NewTraffic()
 		handler.Collector = agent.NewCollector(handler.Traffic)
 		handler.Collector.Net = agent.NewNetMon()
@@ -118,6 +119,7 @@ func main() {
 		go handler.Collector.Run()
 		go handler.Policy.Run(handler.Collector.DNS())
 	}
+	go func() { time.Sleep(20 * time.Second); agent.Plugins(false) }() // warm the plugin list
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           handler,

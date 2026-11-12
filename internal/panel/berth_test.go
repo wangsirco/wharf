@@ -23,9 +23,11 @@ import (
 // ---- a fake agent: uci in memory, a few devices, one WAN ----
 
 type fakeAgent struct {
-	mu   sync.Mutex
-	uci  map[string]map[string]Section
-	sets map[string][]string
+	mu      sync.Mutex
+	uci     map[string]map[string]Section
+	sets    map[string][]string
+	guarded int
+	plugins []map[string]any
 }
 
 func newFakeAgent(t *testing.T) (*fakeAgent, *AgentClient) {
@@ -42,44 +44,67 @@ func (fa *fakeAgent) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/v1/uci":
 		out(fa.uci[r.URL.Query().Get("config")])
-	case "/v1/uci/apply":
+	case "/v1/uci/apply", "/v1/uci/guarded":
 		var req struct{ Changes []UciChange }
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		var res []UciResult
-		for i, c := range req.Changes {
-			cfg := fa.uci[c.Config]
-			if cfg == nil {
-				cfg = map[string]Section{}
-				fa.uci[c.Config] = cfg
-			}
-			sec := c.Section
-			switch c.Op {
-			case "add":
-				sec = c.Name
-				if sec == "" {
-					sec = "cfg" + strconv.Itoa(i)
-				}
-				s := Section{".type": c.Type}
-				for k, v := range c.Values {
-					s[k] = jsonish(v)
-				}
-				cfg[sec] = s
-			case "set":
-				for k, v := range c.Values {
-					cfg[sec][k] = jsonish(v)
-				}
-			case "delete":
-				if len(c.Options) > 0 {
-					for _, o := range c.Options {
-						delete(cfg[sec], o)
-					}
-				} else {
-					delete(cfg, sec)
-				}
-			}
-			res = append(res, UciResult{Section: sec, After: cfg[sec]})
+		res := fa.apply(req.Changes)
+		if r.URL.Path == "/v1/uci/guarded" {
+			fa.guarded++
+			out(map[string]any{"results": res, "pending": map[string]any{"token": "tok", "deadline": 99, "configs": []string{"network"}}})
+			return
 		}
 		out(map[string]any{"results": res})
+	case "/v1/plugins":
+		out(fa.plugins)
+	case "/v1/uci/confirm", "/v1/uci/rollback":
+		out(map[string]bool{"ok": true})
+	default:
+		fa.serve2(w, r)
+	}
+}
+
+func (fa *fakeAgent) apply(changes []UciChange) []UciResult {
+	req := struct{ Changes []UciChange }{changes}
+	var res []UciResult
+	for i, c := range req.Changes {
+		cfg := fa.uci[c.Config]
+		if cfg == nil {
+			cfg = map[string]Section{}
+			fa.uci[c.Config] = cfg
+		}
+		sec := c.Section
+		switch c.Op {
+		case "add":
+			sec = c.Name
+			if sec == "" {
+				sec = "cfg" + strconv.Itoa(i)
+			}
+			s := Section{".type": c.Type}
+			for k, v := range c.Values {
+				s[k] = jsonish(v)
+			}
+			cfg[sec] = s
+		case "set":
+			for k, v := range c.Values {
+				cfg[sec][k] = jsonish(v)
+			}
+		case "delete":
+			if len(c.Options) > 0 {
+				for _, o := range c.Options {
+					delete(cfg[sec], o)
+				}
+			} else {
+				delete(cfg, sec)
+			}
+		}
+		res = append(res, UciResult{Config: c.Config, Section: sec, After: cfg[sec]})
+	}
+	return res
+}
+
+func (fa *fakeAgent) serve2(w http.ResponseWriter, r *http.Request) {
+	out := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+	switch r.URL.Path {
 	case "/v1/devices":
 		out([]Device{{MAC: "aa:bb:cc:00:00:20", IP: "192.168.1.20", Hostname: "mini", Online: true}, {MAC: "aa:bb:cc:00:00:30", IP: "192.168.1.30", Hostname: "nas", Online: true}})
 	case "/v1/wans":

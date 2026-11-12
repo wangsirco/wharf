@@ -43,7 +43,7 @@ Wharf turns this into a panel that family members can read, that admins can safe
 | Principle | In practice |
 |---|---|
 | Native OpenWrt only | Port forwards are standard `firewall` redirects, source restrictions use `ipset`, and DNS statistics come from dnsmasq's own query log. After uninstalling Wharf your rules are still ordinary OpenWrt configuration and still visible in LuCI. |
-| No kernel changes, no outages | Changes are applied with `reload`. Wharf never restarts the network or the WAN. |
+| No kernel changes, no surprise outages | Changes are applied with `reload`. Wharf restarts an interface only when you ask, and network / firewall changes roll back unless confirmed. |
 | Admins are isolated | Scoped admins only see and change what they created. Sensitive actions can require super-admin approval. |
 | Everything is traceable | Every change is audited: who, when, from which IP, old value and new value. Restorable changes can be undone with one click. |
 | Data stays at home | The IP database and content rules are local, and no cloud service is required. NextDNS, Proxmox and the update check are optional. |
@@ -557,6 +557,31 @@ Keeps DNS records pointing at the router when the public IP changes. *动态域�
 - Credentials are stored only in the panel database and shown with the last 4 characters. Give the panel a token that can only edit DNS (each provider's note says how).
 - For Cloudflare you can choose whether the record is proxied (orange cloud); keep it off for names used by proxy nodes or port forwards.
 
+### 6.17 Network interfaces
+
+*路由器 → 网络接口* (`network.view` to look, `network.manage` to change).
+
+- **Connection card:** online or not, how long the line has been up, the **public IP** (click to copy) and whether the router holds it directly, sits behind a modem, or is behind carrier-grade NAT; plus protocol, WAN address, gateway, DNS, IPv6 and firewall type.
+- **One card per interface** (LAN, WAN, WAN6, any WAN2 / IoT you add): addresses, gateway, DNS, uptime, device and bridge ports, cable and link speed, traffic, MAC, firewall zone, mwan3 state and netifd errors. Restart, stop / start, edit, delete (not LAN).
+- **Editing:** DHCP, static, PPPoE, DHCPv6, bridge-only and any other protocol the router has; address / mask / gateway, PPPoE account (a saved password is never shown), device, firewall zone, ISP DNS on/off, MTU, metric, MAC clone, auto start.
+- **Apply, then confirm:** changes take effect at once and a yellow bar asks you to keep them. Without a confirmation within 90 seconds (4 minutes when the LAN address changes) — or if the router or Wharf restarts meanwhile — the router puts the previous configuration back. Snapshots live in `/etc/wharf-rollback` until confirmed or restored.
+- **Diagnose:** cable → address (recognises rejected PPPoE accounts and dial timeouts) → ISP gateway (ARP when it ignores ping) → internet → DNS (router vs public resolver) → web, then says whether the fault is at home, the account, the ISP, or DNS / a proxy plugin.
+- **Outage bar:** the router pings the internet every 10 seconds; when it can't, every page shows a red *外网断了* bar with a link to the diagnosis. Physical ports and a 30-day outage history are on the same page.
+
+### 6.18 DHCP and DNS
+
+Address pools (range, lease time, DNS and gateway handed out), upstream DNS (recognises NextDNS, SmartDNS, OpenClash … as the upstream), cache, local domain, rebind protection, AAAA filtering; static leases with IP / MAC clash checks and a one-click "keep this address" from the lease list. Changes apply directly and are audited and restorable.
+
+### 6.19 Firewall
+
+Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone forwarding, clean-up of zones listing interfaces that no longer exist) and traffic rules (add, edit, enable / disable, delete). Wharf's own rules are hidden by default and read-only. Every change goes through apply-then-confirm. `firewall.manage` to change.
+
+### 6.20 Plugins
+
+- **Installed:** every LuCI app with a Chinese name, state, ports and whether they are open to the WAN; warnings when two proxy or two DNS plugins run at once or a plugin holds one of Wharf's ports.
+- **Plugin page:** start / stop / restart / autostart its services, its processes and ports (open a LAN port to the WAN with one click, as an `owpplug_*` rule). Each of the plugin's settings pages is redrawn in Wharf's design — Lua CBI pages through LuCI's own parser on the router, JavaScript views in a sandboxed iframe — and can be edited and saved (only the plugin's own config, audited, reloaded the LuCI way). Parts a plugin draws itself link to LuCI.
+- **Store:** LuCI apps from the router's opkg feeds; a dry run checks dependencies, architecture, free space, clashes with installed plugins and whether Wharf already covers it before installing (with the Chinese translation when there is one). Install / remove run in the background with a live log; what Wharf installed is listed in `/etc/wharf-apps.list`. Needs `plugins.install`.
+
 ---
 
 ## 7. Multiple admins and permissions
@@ -583,6 +608,12 @@ Keeps DNS records pointing at the router when the public IP changes. *动态域�
 | `tools.diag` | Tools | route trace, TCP ping, DNS / HTTP tests, speed tests, LAN scan, monitors |
 | `tools.capture` | Tools | packet capture, analysis, pcap download (can see content; grant carefully) |
 | `proxy.manage` | Proxy | use the proxy extension: own nodes and proxy users (ports within the granted ranges; cannot see others') |
+| `network.view` | Network settings | see interfaces, public IP, DHCP / DNS, firewall (read-only) |
+| `network.manage` | Network settings | change / restart / add / delete interfaces, DHCP pools, static leases, DNS upstreams |
+| `firewall.manage` | Network settings | change firewall defaults, zones, zone forwarding, traffic rules |
+| `plugins.view` | Plugins | see plugins, services, ports and settings pages (secrets hidden) |
+| `plugins.manage` | Plugins | start / stop plugins, change their settings, open their ports to the WAN |
+| `plugins.install` | Plugins | install / remove LuCI apps from the opkg feeds |
 
 ### 7.3 Quotas and port-range grants
 
@@ -642,13 +673,18 @@ Wharf only changes things when you use the matching feature, and uses standard c
 | Optional components | opkg packages, recorded in `/etc/wharf-deps.list` | when you install them from the panel | the ones Wharf installed are removed (see section 5) |
 | Byte accounting | `/etc/sysctl.d/90-wharf.conf` | when you enable it in the panel | removed |
 | Panel data | `owp.main.data_dir` (database, certificates, IP database, rules; a downloaded UI goes in its `web/` folder) | while running | kept; delete by hand if you want |
+| Interface / DHCP / DNS / firewall settings | `/etc/config/network`, `dhcp`, `firewall` | only when you change them on those pages | kept (your settings) |
+| Confirm snapshots | `/etc/wharf-rollback/` | after an interface / firewall change until confirmed or restored | deleted then |
+| Plugin settings | the plugin's own `/etc/config/<plugin>` | when you save on a plugin page | kept |
+| Plugin ports opened | firewall rule `owpplug_<port>_<proto>` | when you click *向外网开放* | kept (close it on the plugin page) |
+| Apps from the store | opkg packages, listed in `/etc/wharf-apps.list` | when you install them | kept |
 | Proxy extension | `/etc/init.d/wharf-proxy`; core, config and certificates in `<data_dir>-proxy`; node redirects (`owpx_*`); for *split by source* the iptables chains `owp_pxy` / `owp_pxyin` and ipset `owp_pxy_skip`; for *take over* the old forward is disabled and tagged `wharf_adopted` | installing the extension, adding nodes | all removed; a taken-over forward is switched back on |
 
-**What Wharf never does:**
-- restart the network or the WAN
-- change the LAN subnet, WAN dial-up or Wi-Fi
+**What Wharf never does on its own:**
+- restart the network or the WAN — only the one interface you restart on the interfaces page
+- change the LAN subnet or WAN dial-up — changes you make there must be confirmed or they are rolled back; Wi-Fi is never touched
 - upgrade firmware or kernel
-- touch other plugins' configuration
+- touch other plugins' configuration — unless you save a plugin page
 
 ---
 

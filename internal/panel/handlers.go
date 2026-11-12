@@ -201,6 +201,51 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("DELETE /api/ext/berth/v1/bans/{id}", a.berthAPI("bans", a.handleBerthBanDelete))
 	m.HandleFunc("POST /api/ext/berth/v1/alerts", a.berthAPI("alerts", a.handleBerthAlert))
 	m.HandleFunc("POST /api/ext/berth/v1/sso/ticket", a.berthAPI("sso", a.handleBerthSSOTicket))
+	// network settings (interfaces, DHCP / DNS, firewall)
+	m.HandleFunc("GET /api/net/health", a.auth("dashboard.view", a.handleNetHealth))
+	m.HandleFunc("GET /api/net/interfaces", a.auth("network.view", a.handleNetInterfaces))
+	m.HandleFunc("POST /api/net/interfaces", a.auth("network.manage", a.handleNetIfaceAdd))
+	m.HandleFunc("PUT /api/net/interfaces/{name}", a.auth("network.manage", a.handleNetIfaceSave))
+	m.HandleFunc("DELETE /api/net/interfaces/{name}", a.auth("network.manage", a.handleNetIfaceDelete))
+	m.HandleFunc("POST /api/net/interfaces/{name}/action", a.auth("network.manage", a.handleNetIfaceAction))
+	m.HandleFunc("POST /api/net/diagnose", a.auth("dashboard.view", a.handleNetDiagnose))
+	m.HandleFunc("POST /api/net/confirm", a.auth("", a.handleNetConfirm(true)))
+	m.HandleFunc("POST /api/net/rollback", a.auth("", a.handleNetConfirm(false)))
+	m.HandleFunc("GET /api/net/dhcp", a.auth("network.view", a.handleNetDHCP))
+	m.HandleFunc("POST /api/net/dhcp/pool", a.auth("network.manage", a.handleNetDHCPPool))
+	m.HandleFunc("PUT /api/net/dhcp/pool/{section}", a.auth("network.manage", a.handleNetDHCPPool))
+	m.HandleFunc("PUT /api/net/dhcp/host", a.auth("network.manage", a.handleNetDHCPHost))
+	m.HandleFunc("DELETE /api/net/dhcp/host/{section}", a.auth("network.manage", a.handleNetDHCPHost))
+	m.HandleFunc("PUT /api/net/dns", a.auth("network.manage", a.handleNetDNS))
+	m.HandleFunc("GET /api/net/firewall", a.auth("network.view", a.handleNetFirewall))
+	m.HandleFunc("PUT /api/net/firewall/defaults", a.auth("firewall.manage", a.handleFwDefaults))
+	m.HandleFunc("POST /api/net/firewall/zone", a.auth("firewall.manage", a.handleFwZone))
+	m.HandleFunc("PUT /api/net/firewall/zone/{section}", a.auth("firewall.manage", a.handleFwZone))
+	m.HandleFunc("DELETE /api/net/firewall/zone/{section}", a.auth("firewall.manage", a.handleFwZone))
+	m.HandleFunc("POST /api/net/firewall/forwarding", a.auth("firewall.manage", a.handleFwForwarding))
+	m.HandleFunc("DELETE /api/net/firewall/forwarding/{section}", a.auth("firewall.manage", a.handleFwForwarding))
+	m.HandleFunc("POST /api/net/firewall/rule", a.auth("firewall.manage", a.handleFwRule))
+	m.HandleFunc("PUT /api/net/firewall/rule/{section}", a.auth("firewall.manage", a.handleFwRule))
+	m.HandleFunc("DELETE /api/net/firewall/rule/{section}", a.auth("firewall.manage", a.handleFwRule))
+	m.HandleFunc("POST /api/net/firewall/rule/{section}/toggle", a.auth("firewall.manage", a.handleFwRule))
+	m.HandleFunc("POST /api/net/firewall/tidy", a.auth("firewall.manage", a.handleFwTidy))
+
+	// plugins and the app store
+	m.HandleFunc("GET /api/plugins", a.auth("plugins.view", a.handlePlugins))
+	m.HandleFunc("POST /api/plugins/service", a.auth("plugins.manage", a.handlePluginService))
+	m.HandleFunc("GET /api/plugins/form", a.auth("plugins.view", a.handlePluginForm))
+	m.HandleFunc("GET /api/plugins/uci", a.auth("plugins.view", a.handlePluginUci))
+	m.HandleFunc("GET /api/plugins/i18n", a.auth("plugins.view", a.handlePluginI18n))
+	m.HandleFunc("GET /api/plugins/file", a.auth("plugins.view", a.handlePluginFile))
+	m.HandleFunc("POST /api/plugins/rpc", a.auth("plugins.view", a.handlePluginRPC))
+	m.HandleFunc("PUT /api/plugins/save", a.auth("plugins.manage", a.handlePluginSave))
+	m.HandleFunc("POST /api/plugins/port", a.auth("plugins.manage", a.handlePluginPort))
+	m.HandleFunc("GET /api/store", a.auth("plugins.view", a.handleStore))
+	m.HandleFunc("GET /api/store/check", a.auth("plugins.install", a.handleStoreCheck))
+	m.HandleFunc("POST /api/store", a.auth("plugins.install", a.handleStoreAction))
+	m.HandleFunc("GET /api/store/job", a.auth("plugins.view", a.handleStoreJob))
+	m.HandleFunc("GET /luci-sandbox.html", a.handleLuciSandbox)
+
 	m.HandleFunc("/api/ext/", func(w http.ResponseWriter, r *http.Request) { jsonErr(w, 404, "not found") })
 
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { jsonErr(w, 404, "not found") })
@@ -222,6 +267,23 @@ func (a *App) securityHeaders(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// handleLuciSandbox serves the page that runs a plugin's LuCI JavaScript view.
+// It is loaded in an iframe with sandbox="allow-scripts" (no same-origin): an
+// opaque origin without the panel's cookies or API, talking only via postMessage.
+func (a *App) handleLuciSandbox(w http.ResponseWriter, r *http.Request) {
+	b, err := fs.ReadFile(a.webState().fs, "luci-sandbox.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	hd := w.Header()
+	hd.Del("X-Frame-Options")
+	hd.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'; sandbox allow-scripts")
+	hd.Set("Content-Type", "text/html; charset=utf-8")
+	hd.Set("Cache-Control", "no-cache")
+	_, _ = w.Write(b)
 }
 
 func init() { _ = mime.AddExtensionType(".webmanifest", "application/manifest+json") }

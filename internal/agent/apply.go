@@ -1,19 +1,70 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
+	"regexp"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 )
 
-// Configs the agent is willing to modify. Everything else is read-only.
+// Configs the agent is willing to modify with a known reload. Other configs in
+// /etc/config (plugins) are writable too, except the protected ones below, and
+// are reloaded the way LuCI does it.
 var writableConfigs = map[string]string{
 	"firewall": "firewall", // config -> init.d service reloaded after commit
 	"dhcp":     "dnsmasq",
+	"network":  "network",
 	"owpfwd":   "", // port-forward metadata written by the panel
 	"owpdev":   "", // per-device policies (compiled by Policy, not by a service)
+}
+
+// protectedConfigs are never written through the generic path: the agent's own
+// settings (a change restarts the agent), remote access and the RPC daemon.
+var protectedConfigs = map[string]bool{"owp": true, "rpcd": true, "uhttpd": true, "dropbear": true, "ucitrack": true, "luci": true}
+
+var cfgNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,40}$`)
+
+func configWritable(cfg string) error {
+	if _, ok := writableConfigs[cfg]; ok {
+		return nil
+	}
+	if protectedConfigs[cfg] || !cfgNameRe.MatchString(cfg) {
+		return fmt.Errorf("config %q is not writable", cfg)
+	}
+	if _, err := os.Stat("/etc/config/" + cfg); err != nil {
+		return fmt.Errorf("config %q does not exist", cfg)
+	}
+	return nil
+}
+
+// reloadConfig applies a committed config: known services are reloaded (never
+// restarted), plugins the way LuCI does it — the legacy ucitrack init script is
+// restarted, otherwise procd gets a config.change event for the package.
+func reloadConfig(cfg string) {
+	if svc, ok := writableConfigs[cfg]; ok {
+		if svc == "" {
+			return
+		}
+		if _, err := run(60*time.Second, "/etc/init.d/"+svc, "reload"); err != nil {
+			log.Printf("reload %s: %v", svc, err)
+		}
+		if cfg == "dhcp" && fileExists("/etc/init.d/odhcpd") {
+			_, _ = run(30*time.Second, "/etc/init.d/odhcpd", "reload")
+		}
+		return
+	}
+	if init := uciValue("ucitrack.@" + cfg + "[0].init"); init != "" && cfgNameRe.MatchString(init) && fileExists("/etc/init.d/"+init) {
+		if _, err := run(90*time.Second, "/etc/init.d/"+init, "restart"); err != nil {
+			log.Printf("restart %s: %v", init, err)
+		}
+		return
+	}
+	_ = ubusCall("service", "event", map[string]any{"type": "config.change", "data": map[string]any{"package": cfg}}, nil)
 }
 
 // Change is one uci mutation.
@@ -44,11 +95,22 @@ var applyMu sync.Mutex
 func Apply(changes []Change) ([]ChangeResult, error) {
 	applyMu.Lock()
 	defer applyMu.Unlock()
+	if p := CurrentPending(); p != nil {
+		for _, c := range changes {
+			if slices.Contains(p.Configs, c.Config) {
+				return nil, errors.New("还有一项改动在等待确认，请先确认或撤销")
+			}
+		}
+	}
+	return applyLocked(changes)
+}
+
+func applyLocked(changes []Change) ([]ChangeResult, error) {
 
 	touched := map[string]bool{}
 	for _, c := range changes {
-		if _, ok := writableConfigs[c.Config]; !ok {
-			return nil, fmt.Errorf("config %q is not writable", c.Config)
+		if err := configWritable(c.Config); err != nil {
+			return nil, err
 		}
 		touched[c.Config] = true
 	}
@@ -119,12 +181,7 @@ func Apply(changes []Change) ([]ChangeResult, error) {
 		results[i].After, _ = uciGetSection(results[i].Config, results[i].Section)
 	}
 	for _, cfg := range cfgs {
-		if svc := writableConfigs[cfg]; svc != "" {
-			// reload, never restart: keeps existing connections and the WAN up
-			if _, err := run(60*time.Second, "/etc/init.d/"+svc, "reload"); err != nil {
-				log.Printf("reload %s: %v", svc, err)
-			}
-		}
+		reloadConfig(cfg)
 	}
 	return results, nil
 }

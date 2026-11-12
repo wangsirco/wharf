@@ -59,6 +59,18 @@ type NetMon struct {
 	lastUp  int64
 	wasUp   bool
 	inited  bool
+	health  NetHealth
+}
+
+// NetHealth is the latest 10-second round: can the router reach the internet right now?
+type NetHealth struct {
+	TS        int64           `json:"ts"`
+	Internet  bool            `json:"internet"`             // any public target answered
+	Gateway   string          `json:"gateway,omitempty"`    // WAN gateway pinged this round
+	GatewayOK bool            `json:"gateway_ok"`           // the gateway answered (some ISPs never do)
+	Targets   map[string]bool `json:"targets"`              // target -> answered
+	DownSince int64           `json:"down_since,omitempty"` // first round without internet in the current outage
+	Checked   bool            `json:"checked"`
 }
 
 var pingRe = regexp.MustCompile(`time=([\d.]+) ms`)
@@ -123,13 +135,22 @@ func ping(target string) []float64 {
 
 func (n *NetMon) round() {
 	var wg sync.WaitGroup
-	for _, t := range n.targets() {
+	ts := n.targets()
+	answered := map[string]bool{}
+	for _, t := range ts {
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
 			r := ping(t)
+			ok := false
+			for _, v := range r {
+				if !math.IsNaN(v) {
+					ok = true
+				}
+			}
 			n.mu.Lock()
 			n.samples[t] = append(n.samples[t], r...)
+			answered[t] = ok
 			n.mu.Unlock()
 		}(t)
 	}
@@ -139,6 +160,21 @@ func (n *NetMon) round() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	now := time.Now().Unix()
+	h := NetHealth{TS: now, Targets: answered, Gateway: w.Gateway, Checked: true}
+	for t, ok := range answered {
+		if t == w.Gateway {
+			h.GatewayOK = ok
+		} else if ok {
+			h.Internet = true
+		}
+	}
+	if !h.Internet {
+		h.DownSince = n.health.DownSince
+		if h.DownSince == 0 {
+			h.DownSince = now
+		}
+	}
+	n.health = h
 	if n.inited {
 		switch {
 		case n.wasUp && !w.Up:
@@ -150,6 +186,18 @@ func (n *NetMon) round() {
 		}
 	}
 	n.inited, n.wasUp, n.lastUp = true, w.Up, w.Uptime
+}
+
+// Health returns the latest round.
+func (n *NetMon) Health() NetHealth {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	h := n.health
+	h.Targets = map[string]bool{}
+	for k, v := range n.health.Targets {
+		h.Targets[k] = v
+	}
+	return h
 }
 
 // Flush returns this minute's stats and events and resets them.

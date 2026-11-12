@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -272,6 +273,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, WANList())
 	case r.Method == "GET" && r.URL.Path == "/v1/listen":
 		writeJSON(w, 200, Listeners())
+	case strings.HasPrefix(r.URL.Path, "/v1/net") || strings.HasPrefix(r.URL.Path, "/v1/plugins") || strings.HasPrefix(r.URL.Path, "/v1/luci/") ||
+		strings.HasPrefix(r.URL.Path, "/v1/store") || r.URL.Path == "/v1/uci/guarded" || r.URL.Path == "/v1/uci/confirm" || r.URL.Path == "/v1/uci/rollback":
+		s.netAPI(w, r, body)
 	case r.Method == "GET" && r.URL.Path == "/v1/neigh":
 		// ip -> mac for LAN clients (used by the panel's LAN access control)
 		writeJSON(w, 200, Neighbours())
@@ -484,6 +488,125 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte) {
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
+	default:
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+	}
+}
+
+// netAPI: interfaces, guarded changes, plugins and the app store.
+func (s *Server) netAPI(w http.ResponseWriter, r *http.Request, body []byte) {
+	fail := func(code int, err error) { writeJSON(w, code, map[string]string{"error": err.Error()}) }
+	var req struct {
+		Name    string         `json:"name"`
+		Action  string         `json:"action"`
+		Iface   string         `json:"iface"`
+		Changes []Change       `json:"changes"`
+		Seconds int            `json:"seconds"`
+		Summary string         `json:"summary"`
+		Token   string         `json:"token"`
+		Pkgs    []string       `json:"pkgs"`
+		Object  string         `json:"object"`
+		Method  string         `json:"method"`
+		Params  map[string]any `json:"params"`
+	}
+	if r.Method == "POST" && len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			fail(400, err)
+			return
+		}
+	}
+	q := r.URL.Query()
+	switch r.Method + " " + r.URL.Path {
+	case "GET /v1/net":
+		writeJSON(w, 200, GetNetOverview())
+	case "GET /v1/net/health":
+		out := map[string]any{"wans": WANList(), "pending": CurrentPending(), "rollback": LastRollback()}
+		if s.Collector != nil && s.Collector.Net != nil {
+			out["health"] = s.Collector.Net.Health()
+		}
+		writeJSON(w, 200, out)
+	case "POST /v1/net/iface":
+		if err := IfaceAction(req.Name, req.Action); err != nil {
+			fail(400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	case "POST /v1/net/diagnose":
+		writeJSON(w, 200, DiagnoseWAN(req.Iface))
+	case "POST /v1/uci/guarded":
+		if len(req.Changes) == 0 {
+			fail(400, errors.New("no changes"))
+			return
+		}
+		res, p, err := ApplyGuarded(req.Changes, req.Seconds, req.Summary)
+		if err != nil {
+			fail(409, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"results": res, "pending": p})
+	case "POST /v1/uci/confirm":
+		if err := ConfirmApply(req.Token); err != nil {
+			fail(409, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	case "POST /v1/uci/rollback":
+		if err := RollbackApply(req.Token); err != nil {
+			fail(409, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	case "GET /v1/plugins":
+		writeJSON(w, 200, Plugins(q.Get("fresh") == "1"))
+	case "GET /v1/plugins/form":
+		out, err := PluginForm(q.Get("model"))
+		if err != nil {
+			fail(400, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(out)
+	case "POST /v1/plugins/service":
+		if err := PluginService(req.Name, req.Action); err != nil {
+			fail(400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
+	case "GET /v1/luci/i18n":
+		out, _ := LuciTranslations()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(out)
+	case "GET /v1/luci/file":
+		b, err := LuciFile(q.Get("path"))
+		if err != nil {
+			fail(404, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"source": string(b)})
+	case "POST /v1/luci/rpc":
+		out, err := LuciRPC(req.Object, req.Method, req.Params)
+		if err != nil {
+			fail(400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"result": out})
+	case "GET /v1/store":
+		writeJSON(w, 200, GetStore())
+	case "GET /v1/store/check":
+		c, err := CheckInstall(q.Get("pkg"))
+		if err != nil {
+			fail(400, err)
+			return
+		}
+		writeJSON(w, 200, c)
+	case "GET /v1/store/job":
+		writeJSON(w, 200, StoreStatus())
+	case "POST /v1/store":
+		if err := StartStore(req.Action, req.Pkgs); err != nil {
+			fail(409, err)
+			return
+		}
+		writeJSON(w, 202, map[string]bool{"ok": true})
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 	}
