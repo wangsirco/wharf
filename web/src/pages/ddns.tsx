@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Anchor, History, Loader2, Pencil, Play, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, post } from '@/lib/api'
@@ -33,6 +34,15 @@ export default function DDNSPage() {
   const [log, setLog] = useState<Entry | null>(null)
   const [running, setRunning] = useState(0)
   const { confirm, dialog } = useConfirm()
+  const [q, setQ] = useSearchParams()
+  // opened from 网络接口 → 公网检测 → 设置 DDNS: start a new entry for that interface
+  useEffect(() => {
+    if (!data || !q.get('new')) return
+    const rtype = q.get('rtype') === 'AAAA' ? 'AAAA' : 'A'
+    const iface = q.get('iface') || (rtype === 'AAAA' ? 'wan6' : 'wan')
+    setEdit({ ...blank, rtype, creds: {}, source: { ...blank.source, iface: data.ifaces?.includes(iface) ? iface : blank.source.iface, apis: [] } })
+    setQ({}, { replace: true })
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
   const prov = (id: string) => data?.providers.find((p) => p.id === id)
   const runNow = async (e: Entry) => {
     setRunning(e.id)

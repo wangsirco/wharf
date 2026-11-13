@@ -1,5 +1,11 @@
 # Changelog · 更新日志
 
+## 0.21.0 — Public address check, plugin import · 公网检测、插件导入
+
+- Public address check on the interfaces page: lookup services asked through the WAN are compared with the WAN address, and the hop beyond a modem is classified, to tell a real public IP from a modem in front, a proxy exit or carrier-grade NAT; with what to do next — set up DDNS (opens prefilled; existing records pointing here are listed), bridge / DMZ, ask the ISP, IPv6 + DDNS or a tunnel · 公网检测：外部确认是否真公网，给出 DDNS 等下一步建议
+- Plugin import: plugins are split into "managed by Wharf" and "OpenWrt plugins"; importing converts every settings page once and keeps the structure (no values) on the panel, so pages open at once with current settings and refresh quietly in the background; plugins installed from the store are imported right away; re-import after an upgrade, un-import any time · 插件导入：一次转换全部设置页，之后打开即用
+- Fix: an open plugin page no longer re-converts every 20 seconds · 修复插件页面每 20 秒重新转换一次
+
 ## 0.20.0 — Interfaces, DHCP / DNS, firewall and plugins · 网络接口、DHCP / DNS、防火墙与插件
 
 - Network interfaces page: online state and public IP (direct / behind a modem / CGNAT), a card per LAN / WAN / WAN6 / extra interface with addresses, link, traffic, zone and mwan3 state; restart, stop, edit (DHCP, static, PPPoE, DHCPv6 …), add WAN2 or delete; physical ports and outage history · 网络接口页：公网 IP、各接口状态、重启与设置

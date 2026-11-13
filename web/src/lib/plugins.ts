@@ -5,6 +5,7 @@ export interface PluginItem {
   services: { name: string; enabled: boolean; running: boolean }[] | null; configs: string[] | null; procs: { pid: number; name: string; exe: string }[] | null
   ports: { port: number; proto: string; bind: string; proc: string; local: boolean; wan_open?: boolean; wan_rule?: string }[] | null
   i18n: boolean; by_wharf: boolean; warnings: string[] | null; depends: string[] | null
+  imported?: { version: string; at: number; ok: number; custom: number; failed: number } | null
 }
 
 export const pluginState = (p: PluginItem): [string, 'ok' | 'warn' | 'bad' | 'off'] => {

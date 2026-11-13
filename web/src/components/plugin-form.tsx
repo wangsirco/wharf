@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, Plus, RotateCcw, Save, X } from 'lucide-react'
 import {
   checkDatatype, editableKind, flagOn, initialValues, plainText, sanitizeHTML, sectionChanges, visible, vkey,
@@ -19,8 +19,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 const Html = ({ html, className }: { html?: string | null; className?: string }) =>
   html ? <span className={className} dangerouslySetInnerHTML={{ __html: sanitizeHTML(html) }} /> : null
 
-export function PluginForm({ blocks, editable, luciURL, saving, onSave }: {
-  blocks: FormBlock[]; editable: boolean; luciURL: string; saving?: boolean; onSave: (changes: UciChange[]) => void
+export function PluginForm({ blocks, editable, luciURL, saving, onSave, onDirty }: {
+  blocks: FormBlock[]; editable: boolean; luciURL: string; saving?: boolean; onSave: (changes: UciChange[]) => void; onDirty?: (dirty: boolean) => void
 }) {
   const initial = useMemo(() => {
     const m: Record<string, Values> = {}
@@ -38,6 +38,8 @@ export function PluginForm({ blocks, editable, luciURL, saving, onSave }: {
     })
     return out
   }, [blocks, initial, vals])
+
+  useEffect(() => { onDirty?.(changes.length > 0) }, [changes.length > 0]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (key: string, sid: string, o: FOpt, v: string | string[]) => {
     setVals((cur) => ({ ...cur, [key]: { ...cur[key], [vkey(sid, o.option)]: v } }))

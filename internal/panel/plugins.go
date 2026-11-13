@@ -223,6 +223,7 @@ func (a *App) handlePlugins(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	imports := a.importsMeta()
 	var out []map[string]any
 	for _, p := range list {
 		k := appKey(p.Pkg)
@@ -256,7 +257,7 @@ func (a *App) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{"pkg": p.Pkg, "version": p.Version, "desc": p.Desc, "installed_at": p.InstalledAt, "size": p.Size,
 			"title": nz(m.Name, p.Title), "luci_title": p.Title, "about": m.Desc, "group": m.Group, "group_label": groupLabel[m.Group],
 			"covered": m.Covered, "category": p.Category, "pages": p.Pages, "services": p.Services, "configs": p.Configs, "procs": p.Procs,
-			"ports": ports, "i18n": p.I18n, "by_wharf": p.ByWharf, "warnings": warnings, "depends": p.Depends})
+			"ports": ports, "i18n": p.I18n, "by_wharf": p.ByWharf, "warnings": warnings, "depends": p.Depends, "imported": imports[p.Pkg]})
 	}
 	writeJSON(w, 200, map[string]any{"plugins": out})
 }

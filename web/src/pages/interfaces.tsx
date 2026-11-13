@@ -12,6 +12,7 @@ import { bytes, datetime, duration } from '@/lib/format'
 import { netChanged, protoLabel, roleLabel, type IfaceStat, type NetLink, type Pending, type WanDiag } from '@/lib/netcfg'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout'
+import { PublicIPCard } from '@/components/public-ip'
 import { Dot, Empty, ErrorBox, Field, HalfPanel, Pill, Section, useConfirm } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -96,9 +97,6 @@ export default function Interfaces() {
                   <button className="group flex items-center gap-1 font-mono text-base font-semibold" onClick={() => { navigator.clipboard?.writeText(wan.public!.ip); toast.success('已复制') }}>
                     {wan.public.ip}<Copy className="size-3.5 opacity-0 group-hover:opacity-60" />
                   </button>
-                  {wan.public.kind === 'direct' && <Pill tone="green">路由器直接拿到的公网地址</Pill>}
-                  {wan.public.kind === 'nat' && <Pill tone="amber">路由器在光猫 / 上级路由后面</Pill>}
-                  {wan.public.kind === 'cgnat' && <Pill tone="red">运营商大内网（CGNAT），外面连不进来</Pill>}
                 </div>
               )}
             </div>
@@ -113,6 +111,8 @@ export default function Interfaces() {
           </div>
         </section>
       )}
+
+      {wan && <PublicIPCard iface={wan.name} />}
 
       {diag && <DiagCard d={diag} onClose={() => setDiag(null)} onRerun={() => runDiag(diag.iface)} busy={diagBusy} />}
 

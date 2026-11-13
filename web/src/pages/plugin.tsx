@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, ExternalLink, Globe, Loader2, Lock, Package, Play, RefreshCw, Square } from 'lucide-react'
-import { get, post, put } from '@/lib/api'
+import { ArrowLeft, ExternalLink, Globe, Loader2, Lock, Package, Play, Puzzle, RefreshCw, Square } from 'lucide-react'
+import { post, put } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
 import { datetime } from '@/lib/format'
-import { fromCbi, type FormBlock, type UciChange } from '@/lib/plugin-form'
-import { runLuciView } from '@/lib/luci-view'
+import { type FormBlock, type UciChange } from '@/lib/plugin-form'
+import { convertPage, formPages, storePage, unimportPlugin, withCurrentValues, type ImportedPage, type PluginImport } from '@/lib/plugin-import'
+import { ImportDialog } from '@/components/plugin-import'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout'
 import { Dot, Empty, ErrorBox, Pill, Section, useConfirm } from '@/components/common'
@@ -24,15 +25,25 @@ export default function PluginPage() {
   const manage = can('plugins.manage')
   const { data, error, reload } = useApi<{ plugins: PluginItem[] | null }>('/plugins', 20000)
   const p = data?.plugins?.find((x) => x.pkg === pkg)
+  const imported = !!p?.imported
+  const { data: imp, reload: reloadImp } = useApi<PluginImport>(imported ? `/plugins/import?pkg=${encodeURIComponent(pkg)}` : null)
+  const [importing, setImporting] = useState(false)
   const [q, setQ] = useSearchParams()
-  const pages = useMemo(() => (p?.pages ?? []).filter((g) => g.title && ['cbi', 'form', 'view', 'template'].includes(g.kind)), [p])
+  // tabs come from the imported copy; keyed by path so the 20 s list refresh doesn't reload the page
+  const pages = imported ? imp?.pages ?? [] : []
   const tab = q.get('page') ?? 'overview'
   const page = pages.find((g) => g.path === tab)
+  const { confirm, dialog } = useConfirm()
 
   if (error) return <ErrorBox>{error}</ErrorBox>
   if (!data) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> 正在读取插件…</div>
   if (!p) return <div className="grid gap-3"><ErrorBox>没有安装 {pkg}</ErrorBox><Button variant="outline" className="w-fit" render={<Link to="/plugins" />}><ArrowLeft /> 返回插件</Button></div>
   const [st, tone] = pluginState(p)
+  const native = formPages(p)
+  const unimport = async () => {
+    if (!(await confirm(`把 ${p.title} 交还给 LuCI？`, '只是删掉 Wharf 里转换好的页面，插件本身和它的设置都不受影响。之后可以随时再导入。', { ok: '取消导入' }))) return
+    try { await unimportPlugin(p.pkg); q.delete('page'); setQ(q, { replace: true }); reload() } catch (e) { toast.error((e as Error).message) }
+  }
 
   return (
     <div className="grid gap-4">
@@ -40,7 +51,7 @@ export default function PluginPage() {
         <Button variant="ghost" size="sm" className="-ml-2 mb-1" render={<Link to="/plugins" />}><ArrowLeft /> 插件</Button>
         <PageHeader title={p.title} desc={p.about || p.desc}>
           <span className="flex items-center gap-1.5 text-sm"><Dot tone={tone} />{st}</span>
-          <Button variant="outline" size="sm" render={<a href={luciBase() + (pages[0]?.path ?? '')} target="_blank" rel="noreferrer" />}><ExternalLink /> 在 LuCI 中打开</Button>
+          <Button variant="outline" size="sm" render={<a href={luciBase() + (native[0]?.path ?? '')} target="_blank" rel="noreferrer" />}><ExternalLink /> 在 LuCI 中打开</Button>
         </PageHeader>
       </div>
       {p.covered && (
@@ -48,13 +59,39 @@ export default function PluginPage() {
           Wharf 已经自带了这个功能，通常用 Wharf 自己的页面更方便。<Button size="sm" variant="outline" className="ml-auto" render={<Link to={p.covered} />}>打开 Wharf 的页面</Button>
         </div>
       )}
-      <div className="flex flex-wrap gap-1 border-b">
+      {!imported && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-accent/40 px-4 py-3 text-sm">
+          <Puzzle className="size-5 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">这个插件还在用 OpenWrt 原来的界面</div>
+            <div className="text-muted-foreground">{native.length ? `导入后，它的 ${native.length} 个设置页会一次性换成 Wharf 的样式，以后打开即用。` : '它没有设置页；导入后同样由 Wharf 管理服务和端口。'}</div>
+          </div>
+          {manage ? <Button size="sm" onClick={() => setImporting(true)}><Puzzle /> 导入到 Wharf</Button> : <span className="text-xs text-muted-foreground">需要「管理插件」权限才能导入</span>}
+        </div>
+      )}
+      {imported && imp && imp.version !== p.version && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+          插件从 {imp.version} 升级到了 {p.version}，设置页可能有变化。
+          {manage && <Button size="sm" variant="outline" className="ml-auto" onClick={() => setImporting(true)}><RefreshCw /> 重新导入</Button>}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1 border-b">
         {[{ path: 'overview', title: '服务与端口' }, ...pages].map((g) => (
           <button key={g.path} type="button" onClick={() => { q.set('page', g.path); setQ(q, { replace: true }) }}
             className={cn('-mb-px border-b-2 px-3 py-2 text-sm', tab === g.path ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>{g.title}</button>
         ))}
+        <span className="flex-1" />
+        {imported && manage && (
+          <span className="flex gap-1 pb-1">
+            <Button variant="ghost" size="xs" onClick={() => setImporting(true)}><RefreshCw /> 重新导入</Button>
+            <Button variant="ghost" size="xs" onClick={unimport}>取消导入</Button>
+          </span>
+        )}
       </div>
-      {tab === 'overview' || !page ? <Overview p={p} manage={manage} onChanged={reload} /> : <PageView key={page.path} p={p} page={page} manage={manage} />}
+      {tab === 'overview' || !page ? <Overview p={p} manage={manage} onChanged={reload} />
+        : <PageView key={page.path + (imp?.imported_at ?? 0)} pkg={p.pkg} page={page} manage={manage} />}
+      {importing && <ImportDialog plugins={[p]} onClose={() => { setImporting(false); reload(); reloadImp() }} />}
+      {dialog}
     </div>
   )
 }
@@ -152,30 +189,41 @@ function Info({ k, children }: { k: string; children: React.ReactNode }) {
   return <div className="min-w-0 rounded-lg bg-muted/40 px-3 py-2"><div className="text-xs text-muted-foreground">{k}</div><div className="break-all">{children}</div></div>
 }
 
-function PageView({ p, page, manage }: { p: PluginItem; page: NonNullable<PluginItem['pages']>[number]; manage: boolean }) {
+function PageView({ pkg, page, manage }: { pkg: string; page: ImportedPage; manage: boolean }) {
   const [blocks, setBlocks] = useState<FormBlock[] | null>(null)
+  const [formKey, setFormKey] = useState(0)
   const [err, setErr] = useState('')
+  const [syncing, setSyncing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [gen, setGen] = useState(0)
+  const dirty = useRef(false)
   const luci = luciBase() + page.path
+  const stored = page.blocks
 
+  // 1) the copy made at import time + current uci values: instant
+  // 2) a quiet re-conversion for the live parts (status lines etc.); swapped in only while nothing is being edited
   useEffect(() => {
     let alive = true
-    setBlocks(null); setErr('')
-    const load = page.kind === 'view'
-      ? runLuciView(page.target)
-      : page.kind === 'cbi' || page.kind === 'form'
-        ? get<{ tree: Parameters<typeof fromCbi>[0] }>(`/plugins/form?pkg=${encodeURIComponent(p.pkg)}&model=${encodeURIComponent(page.target)}`).then((r) => fromCbi(r.tree))
-        : Promise.reject(new Error('custom'))
-    load.then((b) => { if (alive) setBlocks(b) }, (e) => { if (alive) setErr((e as Error).message) })
+    setErr('')
+    if (page.status !== 'ok') { setErr(page.status === 'custom' ? 'custom' : page.error || '导入时没能转换'); return }
+    if (stored?.length) withCurrentValues(stored).then((b) => { if (alive && !dirty.current) { setBlocks(b); setFormKey((k) => k + 1) } }, () => {})
+    setSyncing(true)
+    convertPage(pkg, { path: page.path, title: page.title, kind: page.kind, target: page.target, order: 0 }).then((r) => {
+      if (!alive) return
+      setSyncing(false)
+      if (r.status !== 'ok' || !r.blocks) { if (!stored?.length) setErr(r.error || '没能转换'); return }
+      if (!dirty.current) { setBlocks(r.blocks); setFormKey((k) => k + 1) }
+      if (manage) storePage(pkg, r)
+    })
     return () => { alive = false }
-  }, [p.pkg, page, gen])
+  }, [pkg, page.path, gen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (changes: UciChange[]) => {
     setSaving(true)
     try {
-      await put('/plugins/save', { pkg: p.pkg, title: page.title, changes })
+      await put('/plugins/save', { pkg, title: page.title, changes })
       toast.success('已保存并应用，插件会按自己的方式重新加载')
+      dirty.current = false
       setGen((g) => g + 1)
     } catch (e) { toast.error((e as Error).message) } finally { setSaving(false) }
   }
@@ -190,12 +238,15 @@ function PageView({ p, page, manage }: { p: PluginItem; page: NonNullable<Plugin
       </div>
     )
   }
-  if (!blocks) return <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> 正在把插件页面转换成 Wharf 的样式…</div>
+  if (!blocks) return <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> 正在读取设置…</div>
   return (
     <div className="grid gap-3">
       {!manage && <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">你只有查看权限，密码类内容已隐藏。</p>}
-      <PluginForm key={gen} blocks={blocks} editable={manage} luciURL={luci} saving={saving} onSave={save} />
-      <p className="text-xs text-muted-foreground">由 Wharf 从插件的 {page.kind === 'view' ? 'JavaScript 页面' : 'Lua 页面'}自动转换。如果显示不对，<a className="text-primary hover:underline" href={luci} target="_blank" rel="noreferrer">在 LuCI 中打开</a>原页面。</p>
+      <PluginForm key={formKey} blocks={blocks} editable={manage} luciURL={luci} saving={saving} onSave={save} onDirty={(d) => { dirty.current = d }} />
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {syncing && <Loader2 className="size-3 animate-spin" />}
+        由 Wharf 从插件的 {page.kind === 'view' ? 'JavaScript 页面' : 'Lua 页面'}转换{syncing ? '，正在同步最新状态' : ''}。如果显示不对，<a className="text-primary hover:underline" href={luci} target="_blank" rel="noreferrer">在 LuCI 中打开</a>原页面。
+      </p>
     </div>
   )
 }

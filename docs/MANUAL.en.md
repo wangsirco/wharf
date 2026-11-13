@@ -561,7 +561,13 @@ Keeps DNS records pointing at the router when the public IP changes. *动态域�
 
 *路由器 → 网络接口* (`network.view` to look, `network.manage` to change).
 
-- **Connection card:** online or not, how long the line has been up, the **public IP** (click to copy) and whether the router holds it directly, sits behind a modem, or is behind carrier-grade NAT; plus protocol, WAN address, gateway, DNS, IPv6 and firewall type.
+- **Connection card:** online or not, how long the line has been up, the **public IP** (click to copy) plus protocol, WAN address, gateway, DNS, IPv6 and firewall type.
+- **Public address check:** besides the WAN interface's own address, Wharf asks several lookup services (DNSPod, IP.SB, ipify, icanhazip, Cloudflare), leaving through the WAN, which address the outside sees, and compares:
+  - **Real public IP**: the outside sees the WAN address, so home is reachable. When the address can change (PPPoE / DHCP) it offers to set up DDNS, opening the DDNS page with the interface filled in; records already pointing here are listed.
+  - **Outside sees another address**: usually a proxy plugin routing the router's own traffic, or a second NAT at the ISP.
+  - **Router behind a modem**: the hop beyond the modem tells whether the modem holds the public address (switch the modem to bridge mode or make the router its DMZ host) or upstream is still private.
+  - **Carrier-grade NAT**: the WAN or the hop beyond the modem is in 100.64.0.0/10. Ask the ISP for a public IP, use public IPv6 + DDNS, or a tunnel.
+  - "检测明细" lists what each service saw and the first hops; results are cached for 10 minutes, with a re-check button.
 - **One card per interface** (LAN, WAN, WAN6, any WAN2 / IoT you add): addresses, gateway, DNS, uptime, device and bridge ports, cable and link speed, traffic, MAC, firewall zone, mwan3 state and netifd errors. Restart, stop / start, edit, delete (not LAN).
 - **Editing:** DHCP, static, PPPoE, DHCPv6, bridge-only and any other protocol the router has; address / mask / gateway, PPPoE account (a saved password is never shown), device, firewall zone, ISP DNS on/off, MTU, metric, MAC clone, auto start.
 - **Apply, then confirm:** changes take effect at once and a yellow bar asks you to keep them. Without a confirmation within 90 seconds (4 minutes when the LAN address changes) — or if the router or Wharf restarts meanwhile — the router puts the previous configuration back. Snapshots live in `/etc/wharf-rollback` until confirmed or restored.
@@ -579,6 +585,7 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 ### 6.20 Plugins
 
 - **Installed:** every LuCI app with a Chinese name, state, ports and whether they are open to the WAN; warnings when two proxy or two DNS plugins run at once or a plugin holds one of Wharf's ports.
+- **Import:** the list is split into "managed by Wharf" and "OpenWrt plugins". Importing (one plugin, or all) converts every settings page of the plugin to Wharf's design once and keeps the result on the panel (page structure only, no settings values or passwords). From then on a page opens from that copy with the router's current settings filled in, and is quietly refreshed in the background (never while you are editing). Plugins installed from the store are imported right after installing. After a plugin upgrade Wharf asks to re-import; un-importing only drops the converted pages.
 - **Plugin page:** start / stop / restart / autostart its services, its processes and ports (open a LAN port to the WAN with one click, as an `owpplug_*` rule). Each of the plugin's settings pages is redrawn in Wharf's design — Lua CBI pages through LuCI's own parser on the router, JavaScript views in a sandboxed iframe — and can be edited and saved (only the plugin's own config, audited, reloaded the LuCI way). Parts a plugin draws itself link to LuCI.
 - **Store:** LuCI apps from the router's opkg feeds; a dry run checks dependencies, architecture, free space, clashes with installed plugins and whether Wharf already covers it before installing (with the Chinese translation when there is one). Install / remove run in the background with a live log; what Wharf installed is listed in `/etc/wharf-apps.list`. Needs `plugins.install`.
 

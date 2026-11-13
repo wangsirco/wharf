@@ -204,6 +204,9 @@ var migrations = []string{
 		origin TEXT NOT NULL DEFAULT 'berth', sync INTEGER NOT NULL DEFAULT 0, remote_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '');
 	 CREATE TABLE ddns_owner (domain TEXT PRIMARY KEY, owner TEXT NOT NULL CHECK (owner IN ('wharf','berth')));
 	 CREATE TABLE berth_nonce (nonce TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)`,
+	// v21: plugins taken over by Wharf, with their pages converted ahead of time (plugin_import.go)
+	`CREATE TABLE plugin_imports (pkg TEXT PRIMARY KEY, version TEXT NOT NULL, imported_at INTEGER NOT NULL, imported_by TEXT NOT NULL,
+		pages TEXT NOT NULL, refreshed_at INTEGER NOT NULL DEFAULT 0)`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

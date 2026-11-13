@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, CheckCircle2, Download, Loader2, Package, RefreshCw, Search, ShieldAlert, Trash2, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, Loader2, Package, Puzzle, RefreshCw, Search, ShieldAlert, Trash2, XCircle } from 'lucide-react'
 import { get, post } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { pluginState, type PluginItem } from '@/lib/plugins'
+import { formPages } from '@/lib/plugin-import'
+import { ImportDialog } from '@/components/plugin-import'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface StoreApp { pkg: string; version: string; size: number; desc: string; feed: string; installed: string; i18n: string; name: string; about: string; group: string; group_label: string; covered: string; known: boolean }
@@ -39,13 +41,18 @@ export default function PluginsPage() {
 }
 
 function Installed() {
+  const { can } = useAuth()
+  const manage = can('plugins.manage')
   const { data, error, loading, reload } = useApi<{ plugins: PluginItem[] | null }>('/plugins', 30000)
   const [search, setSearch] = useState('')
+  const [importing, setImporting] = useState<PluginItem[] | null>(null)
   const list = useMemo(() => {
     const s = search.trim().toLowerCase()
     return (data?.plugins ?? []).filter((p) => !s || (p.title + p.pkg + p.about + p.luci_title).toLowerCase().includes(s))
       .sort((a, b) => Number(!!a.covered) - Number(!!b.covered) || (pluginState(a)[1] === 'ok' ? 0 : 1) - (pluginState(b)[1] === 'ok' ? 0 : 1) || a.title.localeCompare(b.title))
   }, [data, search])
+  const mine = list.filter((p) => p.imported)
+  const native = list.filter((p) => !p.imported)
   const warn = (data?.plugins ?? []).flatMap((p) => (p.warnings ?? []).map((w) => `${p.title}：${w}`))
   return (
     <>
@@ -59,34 +66,59 @@ function Installed() {
         <div className="relative max-w-sm flex-1"><Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" /><Input className="pl-8" placeholder="搜索插件" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <Button variant="ghost" size="sm" onClick={() => reload()}><RefreshCw className={cn(loading && 'animate-spin')} /> 刷新</Button>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-        {list.map((p) => {
-          const [st, tone] = pluginState(p)
-          return (
-            <Link key={p.pkg} to={`/plugins/${p.pkg}`} className={cn('group grid gap-2 rounded-xl border bg-card p-4 transition-colors hover:border-primary/40', p.covered && 'opacity-75')}>
-              <div className="flex items-start gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground"><Package className="size-5" /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 font-semibold">{p.title}<ArrowRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" /></div>
-                  <div className="truncate text-xs text-muted-foreground">{p.pkg} · {p.version}</div>
-                </div>
-                <span className="flex items-center gap-1.5 text-xs"><Dot tone={tone} />{st}</span>
-              </div>
-              {(p.about || p.desc) && <p className="line-clamp-2 text-sm text-muted-foreground">{p.about || p.desc}</p>}
-              <div className="flex flex-wrap gap-1.5">
-                {p.group_label && <Pill>{p.group_label}</Pill>}
-                {!p.group_label && <Pill>{catLabel[p.category] ?? p.category}</Pill>}
-                {(p.ports ?? []).filter((x) => !x.local).slice(0, 4).map((x) => <Pill key={x.port + x.proto} tone={x.wan_open ? 'amber' : 'blue'}>{x.port}/{x.proto}{x.wan_open ? ' 外网可访问' : ''}</Pill>)}
-                {p.covered && <Pill tone="green">Wharf 已自带</Pill>}
-                {!!p.warnings?.length && <Pill tone="amber">{p.warnings.length} 个提醒</Pill>}
-                {p.by_wharf && <Pill>经 Wharf 安装</Pill>}
-              </div>
-            </Link>
-          )
-        })}
+
+      <div className="grid gap-2">
+        <h2 className="text-sm font-semibold">由 Wharf 管理 <span className="font-normal text-muted-foreground">· {mine.length}</span></h2>
+        {mine.length ? (
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">{mine.map((p) => <PluginCard key={p.pkg} p={p} />)}</div>
+        ) : data ? <Empty>{native.length ? '还没有导入插件。导入后，插件的设置页会一次性换成 Wharf 的样式。' : '没有找到插件'}</Empty> : null}
       </div>
-      {data && !list.length && <Empty>没有找到插件</Empty>}
+
+      {native.length > 0 && (
+        <div className="grid gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">OpenWrt 原有插件 <span className="font-normal text-muted-foreground">· {native.length}</span></h2>
+            <span className="text-xs text-muted-foreground">还在用 LuCI 的界面。导入后由 Wharf 管理，所有设置页提前换好样式，打开即用。</span>
+            <span className="flex-1" />
+            {manage && <Button size="sm" onClick={() => setImporting(native.filter((p) => !p.covered))}><Puzzle /> 全部导入</Button>}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {native.map((p) => <PluginCard key={p.pkg} p={p} onImport={manage ? () => setImporting([p]) : undefined} />)}
+          </div>
+        </div>
+      )}
+      {importing && importing.length > 0 && <ImportDialog plugins={importing} onClose={() => { setImporting(null); reload() }} />}
     </>
+  )
+}
+
+function PluginCard({ p, onImport }: { p: PluginItem; onImport?: () => void }) {
+  const [st, tone] = pluginState(p)
+  const pages = formPages(p).length
+  return (
+    <Link to={`/plugins/${p.pkg}`} className={cn('group grid content-start gap-2 rounded-xl border bg-card p-4 transition-colors hover:border-primary/40', p.covered && 'opacity-75')}>
+      <div className="flex items-start gap-3">
+        <span className={cn('grid size-10 shrink-0 place-items-center rounded-xl', p.imported ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground')}><Package className="size-5" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 font-semibold">{p.title}<ArrowRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-60" /></div>
+          <div className="truncate text-xs text-muted-foreground">{p.pkg} · {p.version}</div>
+        </div>
+        <span className="flex items-center gap-1.5 text-xs"><Dot tone={tone} />{st}</span>
+      </div>
+      {(p.about || p.desc) && <p className="line-clamp-2 text-sm text-muted-foreground">{p.about || p.desc}</p>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {p.group_label && <Pill>{p.group_label}</Pill>}
+        {!p.group_label && <Pill>{catLabel[p.category] ?? p.category}</Pill>}
+        {(p.ports ?? []).filter((x) => !x.local).slice(0, 4).map((x) => <Pill key={x.port + x.proto} tone={x.wan_open ? 'amber' : 'blue'}>{x.port}/{x.proto}{x.wan_open ? ' 外网可访问' : ''}</Pill>)}
+        {p.covered && <Pill tone="green">Wharf 已自带</Pill>}
+        {!!p.warnings?.length && <Pill tone="amber">{p.warnings.length} 个提醒</Pill>}
+        {p.by_wharf && <Pill>经 Wharf 安装</Pill>}
+        {p.imported && p.imported.version !== p.version && <Pill tone="amber">插件已升级，需重新导入</Pill>}
+        {!p.imported && pages > 0 && <Pill>{pages} 个设置页</Pill>}
+        <span className="flex-1" />
+        {onImport && <Button size="xs" variant="outline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onImport() }}><Puzzle /> 导入</Button>}
+      </div>
+    </Link>
   )
 }
 
@@ -99,6 +131,7 @@ function Store() {
   const [checking, setChecking] = useState<StoreApp | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [removing, setRemoving] = useState<StoreApp | null>(null)
+  const [importing, setImporting] = useState<PluginItem[] | null>(null)
 
   useEffect(() => { if (data?.job?.running) setJob(data.job) }, [data])
   const apps = useMemo(() => {
@@ -178,7 +211,19 @@ function Store() {
           </DialogContent>
         </Dialog>
       )}
-      {job && <JobDialog job={job} onClose={() => { setJob(null); reload() }} />}
+      {job && <JobDialog job={job} onClose={async () => {
+        const j = job
+        setJob(null); reload()
+        // a plugin installed here is managed by Wharf right away: convert its pages now
+        if (j.action === 'install' && !j.error && can('plugins.manage')) {
+          try {
+            const r = await get<{ plugins: PluginItem[] | null }>('/plugins?fresh=1')
+            const fresh = (r.plugins ?? []).filter((p) => j.pkgs?.includes(p.pkg) && !p.imported)
+            if (fresh.length) setImporting(fresh)
+          } catch { /* the user can import from the list */ }
+        }
+      }} />}
+      {importing && <ImportDialog plugins={importing} onClose={() => { setImporting(null); reload() }} />}
     </>
   )
 }
