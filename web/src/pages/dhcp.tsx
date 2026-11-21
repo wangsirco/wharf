@@ -7,6 +7,7 @@ import { useApi } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout'
+import { DNSCacheCard } from '@/components/dns-cache'
 import { Empty, ErrorBox, Field, HalfPanel, Pill, Section, useConfirm } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,6 +92,14 @@ export default function DHCPPage() {
       </Section>
 
       {data?.dnsmasq && <DNSCard d={data.dnsmasq} manage={manage} onSaved={reload} />}
+      <DNSCacheCard manage={manage} onRebindAllow={async (name) => {
+        const d = data?.dnsmasq
+        if (!d) return
+        try {
+          await put('/net/dns', { ...d, server: d.server ?? [], rebind_domain: [...new Set([...(d.rebind_domain ?? []), name])] })
+          toast.success(`已允许 ${name} 解析到内网地址`); reload()
+        } catch (e) { toast.error((e as Error).message) }
+      }} />
 
       <Section title="静态分配（固定 IP）" desc="让某台设备每次都拿到同一个地址。设备页的「固定 IP」也写在这里。"
         action={manage && <Button size="sm" onClick={() => setHost({})}><Plus /> 添加</Button>}>

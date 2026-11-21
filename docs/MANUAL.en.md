@@ -578,6 +578,8 @@ Keeps DNS records pointing at the router when the public IP changes. *动态域�
 
 Address pools (range, lease time, DNS and gateway handed out), upstream DNS (recognises NextDNS, SmartDNS, OpenClash … as the upstream), cache, local domain, rebind protection, AAAA filtering; static leases with IP / MAC clash checks and a one-click "keep this address" from the lease list. Changes apply directly and are audited and restorable.
 
+*DNS cache and troubleshooting* shows the resolver chain (devices → dnsmasq → local upstream such as NextDNS → NextDNS cloud → the domain's authoritative servers) with cache sizes, hit rate and when each was last emptied. *Look up* asks every layer for a name and compares it with the authoritative answer, naming the stale layer: a cached "does not exist", an old address, the NextDNS cloud not yet updated (only waiting helps), no such record at all, dropped by rebind protection (allow it in one click) or blocked by NextDNS. *Refresh DNS cache* empties dnsmasq's cache (it keeps serving) and restarts NextDNS when it is the upstream (about a second); `network.manage`, audited. *NextDNS maximum cache age* caps how long any answer is kept — by default a Cloudflare "does not exist" is kept 30 minutes; at 5 minutes a new record shows up at home within 5 minutes.
+
 ### 6.19 Firewall
 
 Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone forwarding, clean-up of zones listing interfaces that no longer exist) and traffic rules (add, edit, enable / disable, delete). Wharf's own rules are hidden by default and read-only. Every change goes through apply-then-confirm. `firewall.manage` to change.

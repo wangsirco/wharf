@@ -1,5 +1,11 @@
 # Changelog · 更新日志
 
+## 0.21.1 — DNS cache and troubleshooting · DNS 缓存与排查
+
+- DHCP / DNS page: the resolver chain with cache sizes and hit rate; look a name up through every layer (dnsmasq, NextDNS on the router, NextDNS cloud, 1.1.1.1, the authoritative servers) to see which one is stale — a cached "does not exist", an old address, the NextDNS cloud, rebind protection (allow in one click), a NextDNS block, or no such record · 逐层查询，指出卡在哪一层
+- Refresh DNS cache: dnsmasq (without interruption) and NextDNS (restart, about a second); audited · 一键刷新 DNS 缓存
+- NextDNS maximum cache age, so new records show up at home within minutes instead of the zone's 30-minute negative TTL · NextDNS 缓存最长保留
+
 ## 0.21.0 — Public address check, plugin import · 公网检测、插件导入
 
 - Public address check on the interfaces page: lookup services asked through the WAN are compared with the WAN address, and the hop beyond a modem is classified, to tell a real public IP from a modem in front, a proxy exit or carrier-grade NAT; with what to do next — set up DDNS (opens prefilled; existing records pointing here are listed), bridge / DMZ, ask the ISP, IPv6 + DDNS or a tunnel · 公网检测：外部确认是否真公网，给出 DDNS 等下一步建议

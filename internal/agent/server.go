@@ -276,6 +276,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/v1/net") || strings.HasPrefix(r.URL.Path, "/v1/plugins") || strings.HasPrefix(r.URL.Path, "/v1/luci/") ||
 		strings.HasPrefix(r.URL.Path, "/v1/store") || r.URL.Path == "/v1/uci/guarded" || r.URL.Path == "/v1/uci/confirm" || r.URL.Path == "/v1/uci/rollback":
 		s.netAPI(w, r, body)
+	case r.Method == "GET" && r.URL.Path == "/v1/dns/cache":
+		writeJSON(w, 200, GetDNSCache())
+	case r.Method == "POST" && r.URL.Path == "/v1/dns/trace":
+		var req struct{ Name, Type string }
+		_ = json.Unmarshal(body, &req)
+		t, err := DNSTraceName(req.Name, req.Type)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, t)
+	case r.Method == "POST" && r.URL.Path == "/v1/dns/flush":
+		var req struct {
+			Targets []string `json:"targets"`
+		}
+		_ = json.Unmarshal(body, &req)
+		res, err := DNSFlush(req.Targets)
+		if err != nil {
+			writeJSON(w, 409, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"results": res})
+	case r.Method == "POST" && r.URL.Path == "/v1/dns/nextdns":
+		var req struct {
+			MaxAge string `json:"cache_max_age"`
+		}
+		_ = json.Unmarshal(body, &req)
+		if err := SetNextDNSMaxAge(req.MaxAge); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
 	case r.Method == "GET" && r.URL.Path == "/v1/neigh":
 		// ip -> mac for LAN clients (used by the panel's LAN access control)
 		writeJSON(w, 200, Neighbours())
