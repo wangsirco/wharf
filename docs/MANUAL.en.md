@@ -525,6 +525,8 @@ When you save a node, the panel generates the full Xray configuration and has Xr
 
 **Overview (big screen):** current up / down rate (every 3 s), today's and this month's usage, users and addresses online; each node's live rate and usage; the usage trend and top users; who is connected, from which address and where. Live rates come from the router's connection table. Totals come from Xray's counters; with Vision, Xray books a connection's bytes when it closes, so long connections show up after they end.
 
+**Usage:** the bar-chart icon on a node or user (or a node card) opens its usage for the last 1 / 3 / 12 hours, today, yesterday, 7 / 30 days, this or last month, since it was created, or chosen dates: total, up / down, average per day, the busiest hour or day, a chart, and who used it (or which nodes); a row opens that user's or node's own usage. The last three days are kept in 5-minute steps, older periods by the hour for 400 days. Lists show each node's and user's lifetime total.
+
 **Access records:** which sites proxy users reached (destination name / IP, port, count, source address and location; services the rules recognise are named), merged per minute and kept 30 days by default. Connections refused by a rule are marked. *Source IPs* lists every address a user connected from. To the outside world your friends' traffic comes from your home IP; these records let you account for it.
 
 **Rules for every proxy user** (extension settings): block BitTorrent (on by default), blocked destination ports (25 by default, against spam), blocked sites (domains, including subdomains).
@@ -590,6 +592,25 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 - **Import:** the list is split into "managed by Wharf" and "OpenWrt plugins". Importing (one plugin, or all) converts every settings page of the plugin to Wharf's design once and keeps the result on the panel (page structure only, no settings values or passwords). From then on a page opens from that copy with the router's current settings filled in, and is quietly refreshed in the background (never while you are editing). Plugins installed from the store are imported right after installing. After a plugin upgrade Wharf asks to re-import; un-importing only drops the converted pages.
 - **Plugin page:** start / stop / restart / autostart its services, its processes and ports (open a LAN port to the WAN with one click, as an `owpplug_*` rule). Each of the plugin's settings pages is redrawn in Wharf's design — Lua CBI pages through LuCI's own parser on the router, JavaScript views in a sandboxed iframe — and can be edited and saved (only the plugin's own config, audited, reloaded the LuCI way). Parts a plugin draws itself link to LuCI.
 - **Store:** LuCI apps from the router's opkg feeds; a dry run checks dependencies, architecture, free space, clashes with installed plugins and whether Wharf already covers it before installing (with the Chinese translation when there is one). Install / remove run in the background with a live log; what Wharf installed is listed in `/etc/wharf-apps.list`. Needs `plugins.install`.
+
+### 6.21 Cloudflare
+
+*Links → Cloudflare*, super admins only.
+
+- **Connection:** a token in two steps (the required permissions come pre-selected; a table lists the optional ones), checked right away: what it can do and which permission to add for what is missing. Adding a permission later only needs *Check again*.
+- **Tunnel:** reach the panel from outside without opening a port, exposing the home address or having a public IP. cloudflared comes from Cloudflare's own GitHub releases (SHA-256 checked against the release notes), lives in `<data dir>-tunnel` and runs as nobody under `/etc/init.d/wharf-tunnel`; update or remove it with one click, it goes with the package. Adding a name (e.g. `wharf.example.com`) creates the tunnel, its route and a proxied CNAME (an existing record is only replaced after asking); home web services (LAN addresses) can be published too. Panel visitors arrive on a local socket only cloudflared can open, so the visitor address it reports is trusted: access control, the visitor log and passkeys work as usual. Other tunnels in the account (Berth's, for example) are listed read-only.
+- **Domains:** status and security level of each domain, what Wharf uses under it (panel names, tunnel, DDNS) and Berth's sites; attack mode on / off (off restores the previous level), purge the cache, the last 7 days of requests, traffic, cache hits, threats and visitors.
+- **Access:** an email code from Cloudflare in front of the panel's public or tunnel names, for the listed addresses (or `@domain`), asked daily, weekly or monthly. Needs Zero Trust on the account (the free plan is enough). Wharf only changes its own Access apps ("Wharf · …").
+- With Berth: both panels show the live state at Cloudflare; attack mode and the cache are per domain and affect Berth's sites under it too (you are reminded before switching).
+
+### 6.22 Berth
+
+*Links → Berth*. Before pairing: what Berth (the Linux server panel of the same series) is, where to get it, and pairing in three steps (install Berth, enter Wharf's address in Berth and compare the certificate fingerprint, agree in Wharf). Once paired: open Berth without signing in again, and the pairing's scopes, user mapping and unpairing.
+
+### 6.23 Page contents and the setup wizard
+
+- Pages with many sections get a table of contents: on the right of wide screens, a strip of chips under the top bar elsewhere, following the scroll position.
+- The first-login wizard asks where the panel is opened from (home only / outside without a public IP / with one) and ends with the next useful things in that light: tunnel or public name, alerts, importing plugins, DDNS, pairing with Berth, accounts for family. *Setup wizard* in the user menu opens it again.
 
 ---
 

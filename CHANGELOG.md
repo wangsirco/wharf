@@ -1,5 +1,13 @@
 # Changelog · 更新日志
 
+## 0.22.0 — Cloudflare, Berth, page contents, proxy usage · Cloudflare、Berth、页内目录、代理用量
+
+- Cloudflare page: a token in two steps with every permission explained and checked; Cloudflare Tunnel (cloudflared from Cloudflare's releases, run as nobody; the panel and home services published without opening a port, visitor addresses trusted through a socket only cloudflared can open); domains with attack mode, cache purge and a week of edge statistics; Access email codes in front of the panel. Other tools' objects in the same account (Berth's) are read-only · Cloudflare 独立菜单：隧道、防攻击、Access
+- Berth entry page: what it is, where to get it, pairing in three steps; once paired, open it without signing in · Berth 入口页
+- Page contents on long pages (right-hand list on wide screens, chips under the top bar elsewhere) · 长页面的本页目录
+- Proxy usage for any period per node and per user (last hours, days, months, since creation, chosen dates), busiest hour or day, who used it; lifetime totals in the lists · 代理按任意时段查看用量
+- Setup wizard asks where the panel is opened from and ends with the next useful things · 设置向导
+
 ## 0.21.1 — DNS cache and troubleshooting · DNS 缓存与排查
 
 - DHCP / DNS page: the resolver chain with cache sizes and hit rate; look a name up through every layer (dnsmasq, NextDNS on the router, NextDNS cloud, 1.1.1.1, the authoritative servers) to see which one is stale — a cached "does not exist", an old address, the NextDNS cloud, rebind protection (allow in one click), a NextDNS block, or no such record · 逐层查询，指出卡在哪一层

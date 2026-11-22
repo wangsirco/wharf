@@ -107,7 +107,7 @@ func tunnelReady() int {
 
 func GetTunnelStatus() TunnelStatus {
 	st := TunnelStatus{Asset: cloudflaredAsset(), Dir: tunnelDir, FreeMB: freeMB(filepath.Dir(tunnelDir))}
-	if v := linkTarget(filepath.Join(tunnelDir, "current")); v != "" {
+	if v := tunnelCurrent(); v != "" {
 		if _, err := os.Stat(cloudflaredBin()); err == nil {
 			st.Installed, st.Version = true, v
 		}
@@ -211,7 +211,7 @@ func installCloudflared() error {
 	if err := json.Unmarshal(b, &rel); err != nil || !cfdVersionRe.MatchString(rel.Tag) {
 		return errors.New("读不懂 GitHub 返回的版本信息")
 	}
-	if linkTarget(filepath.Join(tunnelDir, "current")) == rel.Tag {
+	if tunnelCurrent() == rel.Tag {
 		tunnelLog("已经是最新版 " + rel.Tag)
 		return writeTunnelInit()
 	}
@@ -253,7 +253,7 @@ func installCloudflared() error {
 	} else {
 		tunnelLog(firstLine(string(out)))
 	}
-	prev := linkTarget(filepath.Join(tunnelDir, "current"))
+	prev := tunnelCurrent()
 	tmp := filepath.Join(tunnelDir, "current.new")
 	_ = os.Remove(tmp)
 	if err := os.Symlink(rel.Tag, tmp); err != nil {
@@ -374,4 +374,13 @@ func StartTunnelAction(action string) error {
 		return err
 	}
 	return errors.New("未知操作")
+}
+
+// tunnelCurrent: the version the "current" link points at.
+func tunnelCurrent() string {
+	t, err := os.Readlink(filepath.Join(tunnelDir, "current"))
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(t)
 }

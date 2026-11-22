@@ -109,7 +109,7 @@ func cfGraphQL(token, query string, vars map[string]any, out any) error {
 	}
 	if len(env.Errors) > 0 {
 		e := &cfErr{Status: resp.StatusCode, Msg: env.Errors[0].Message}
-		if strings.Contains(strings.ToLower(e.Msg), "not authorized") || strings.Contains(strings.ToLower(e.Msg), "authentication") {
+		if m := strings.ToLower(e.Msg); strings.Contains(m, "not authorized") || strings.Contains(m, "authentication") || strings.Contains(m, "does not have permission") {
 			e.Status = 403
 		}
 		return e
