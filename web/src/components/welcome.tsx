@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  Anchor, ArrowLeftRight, Ban, BarChart3, BellRing, Check, Cpu, Earth, KeyRound, LayoutGrid, Monitor, Server, ShieldHalf, Sparkles, Users,
+  Anchor, BellRing, Check, ChevronRight, Cloud, Earth, Home, LayoutGrid, Puzzle, Server, ShieldHalf, Sparkles, Users, Waypoints,
 } from 'lucide-react'
 import { post, put } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 // Welcome: a short visual tour shown after a user's first successful login.
 // Every step can be skipped; it can be reopened from the user menu.
 export function Welcome() {
-  const { user, onboarded, setOnboarded, isSuper, can, refresh } = useAuth()
+  const { user, onboarded, setOnboarded, isSuper, refresh } = useAuth()
   const brand = useBrand()
   const { mode, setMode } = useMode()
   const navigate = useNavigate()
@@ -28,6 +28,7 @@ export function Welcome() {
   const [step, setStep] = useState(0)
   const [me, setMe] = useState('')
   const [panel, setPanel] = useState({ name: '', subtitle: '' })
+  const [reach, setReach] = useState<Reach>('home')
 
   useEffect(() => { if (user && !onboarded) setOpen(true) }, [user, onboarded])
   useEffect(() => {
@@ -58,15 +59,21 @@ export function Welcome() {
   }
   const go = (to: string) => { finish(); navigate(to) }
 
-  const features = ([
-    [Monitor, '设备', '谁在线、叫什么、在用多少网速；离开和回家都有记录', 'devices.view'],
-    [BarChart3, '流量与画像', '每台设备访问了什么：视频、AI、游戏……一目了然', 'traffic.view'],
-    [Earth, '全球流量', '流量飞向了哪些国家，像大屏一样实时看', 'traffic.view'],
-    [ArrowLeftRight, '端口转发', '按地区 / IP 限制来源，端口段可分配给不同的人', 'forwards.view'],
-    [Ban, '设备管控', '一键断网、定时断网、黑白名单', 'access.manage'],
-    [Cpu, '系统维护', '插件开关、日志、重启、备份', 'system.view'],
-    [Users, '多管理员', '权限、配额、审批，所有改动都能追溯和还原', 'super'],
-  ] as const).filter(([, , , p]) => (p === 'super' ? isSuper : can(p)))
+  // the next useful things; the first follows the answer to "where do you open the panel from"
+  const reachNext: Record<Reach, [typeof Cloud, string, string, string] | null> = {
+    home: null,
+    tunnel: [Waypoints, '用 Cloudflare 隧道从外面打开', '不开端口、不需要公网 IP：连上 Cloudflare，点「接到隧道上」', '/cloudflare?tab=tunnel'],
+    public: [Earth, '给面板一个公网域名', '有公网 IP：域名 + 证书，橙色云或直连都行', '/settings#sec-' + encodeURIComponent('面板域名（公网访问与 Passkey）').replace(/%/g, '').slice(0, 40)],
+  }
+  const next = ([
+    reachNext[reach],
+    [BellRing, '设置告警推送', 'Telegram / Server 酱：断网、新设备、异常流量第一时间知道', '/alerts'],
+    [Puzzle, '把 OpenWrt 插件导入 Wharf', '一次转换所有设置页，之后用 Wharf 的样式管理', '/plugins'],
+    [Waypoints, '动态域名 DDNS', '家里 IP 变了，域名自动跟着走', '/ddns'],
+    [Anchor, '连接 Berth 服务器面板', '家里有服务器？配对后建站自动开端口、封禁互相同步', '/berth'],
+    [Users, '给家人或朋友开个账号', '只给他们需要的功能，所有改动都有记录', '/users'],
+    [ShieldHalf, '限制谁能从公网打开面板', '按地区、IP 放行，默认只允许你所在的地区', '/access'],
+  ] as const).filter(Boolean) as [typeof Cloud, string, string, string][]
 
   const steps: { title: string; body: ReactNode; next?: () => void }[] = [
     {
@@ -110,19 +117,7 @@ export function Welcome() {
       next: saveNames,
     },
     { title: '以后怎么登录？', body: <LoginModeStep /> },
-    {
-      title: '你可以用它做什么',
-      body: (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {features.map(([Icon, t, d]) => (
-            <div key={t} className="flex items-start gap-3 rounded-xl border p-3">
-              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground"><Icon className="size-4" /></span>
-              <span><span className="block text-sm font-medium">{t}</span><span className="text-xs text-muted-foreground">{d}</span></span>
-            </div>
-          ))}
-        </div>
-      ),
-    },
+    ...(isSuper ? [{ title: '从哪里打开面板？', body: <ReachStep value={reach} onChange={setReach} /> }] : []),
     {
       title: '选一个你喜欢的样子',
       body: (
@@ -156,12 +151,16 @@ export function Welcome() {
       title: '准备好了',
       body: isSuper ? (
         <div className="grid gap-2">
-          <p className="text-sm text-muted-foreground">作为超级管理员，建议先做这几件事：</p>
-          {([[KeyRound, '修改初始密码', '/account'], [BellRing, '设置告警推送（Telegram / Server 酱）', '/alerts'], [ShieldHalf, '限制谁能从公网打开面板', '/access'], [Users, '给家人或朋友开个账号', '/users']] as const).map(([Icon, t, to]) => (
-            <button key={to} type="button" onClick={() => go(to)} className="flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted/50">
-              <Icon className="size-4 text-primary" />{t}<span className="ml-auto text-xs text-muted-foreground">去设置 →</span>
-            </button>
-          ))}
+          <p className="text-sm text-muted-foreground">点一项直接过去，也可以点「开始使用」先看看概览。</p>
+          <div className="overflow-hidden rounded-xl border">
+            {next.map(([Icon, t, d, to]) => (
+              <button key={to + t} type="button" onClick={() => go(to)} className="flex w-full items-center gap-3 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted/50">
+                <Icon className="size-4 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{t}</span><span className="block text-xs text-muted-foreground">{d}</span></span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">你能使用的功能都在左侧菜单里。看不到的功能，可以找超级管理员开通。按 ⌘K / Ctrl+K 可以随时搜索设备和页面。</p>
@@ -192,5 +191,29 @@ export function Welcome() {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+type Reach = 'home' | 'tunnel' | 'public'
+
+// Where the panel is opened from: decides what the wizard suggests next.
+function ReachStep({ value, onChange }: { value: Reach; onChange: (r: Reach) => void }) {
+  const opts: [Reach, typeof Home, string, string][] = [
+    ['home', Home, '只在家里用', '在家里用 wharf.lan 或路由器 IP 打开就够了。以后想从外面打开，随时可以设。'],
+    ['tunnel', Waypoints, '外面也要用（没有公网 IP / 不想开端口）', '用 Cloudflare 隧道：不开任何端口，不暴露家里 IP，免费。需要一个托管在 Cloudflare 的域名。'],
+    ['public', Earth, '外面也要用（家里有公网 IP）', '给面板一个公网域名，自动申请证书；可以开 Cloudflare 橙色云隐藏家里 IP，或者直连最快。'],
+  ]
+  return (
+    <div className="grid gap-2">
+      {opts.map(([k, Icon, t, d]) => (
+        <button key={k} type="button" onClick={() => onChange(k)}
+          className={cn('flex items-start gap-3 rounded-xl border p-3 text-left transition-colors hover:border-primary/50', value === k && 'border-primary bg-accent/50 ring-2 ring-primary/20')}>
+          <Icon className="mt-0.5 size-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{t}</span><span className="block text-xs text-muted-foreground">{d}</span></span>
+          {value === k && <Check className="size-4 shrink-0 text-primary" />}
+        </button>
+      ))}
+      <p className="text-xs text-muted-foreground">不知道家里是不是公网 IP？「网络接口」页的「公网检测」会告诉你。不管选哪种，从外面打开时都受「面板访问控制」保护。</p>
+    </div>
   )
 }
