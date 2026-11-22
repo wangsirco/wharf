@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { TocBar, TocSide } from '@/components/page-toc'
 import { NetBanner } from '@/components/net-banner'
 import {
   Activity, Anchor, ArrowLeftRight, ArrowUpCircle, Ban, BarChart3, BellRing, BrickWall, ClipboardCheck, Cpu, Earth, Globe, Inbox, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, Network, Puzzle, Rocket, ScrollText, Search as SearchIcon, Server, Settings, ShieldAlert, ShieldHalf, Sparkles, Sun, Users, Waypoints, Wrench, X,
@@ -172,7 +173,10 @@ export function Layout() {
         </header>
         <NetBanner />
         <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6">
-          <ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary>
+          <div className="flex gap-8">
+            <div className="min-w-0 flex-1"><TocBar /><ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary></div>
+            <TocSide />
+          </div>
         </main>
         <CommandPalette />
       </div>

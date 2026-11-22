@@ -37,7 +37,7 @@ export function Field({ label, hint, children, className }: { label: string; hin
 
 export function Section({ title, desc, children, action, className }: { title: string; desc?: string; children: ReactNode; action?: ReactNode; className?: string }) {
   return (
-    <section className={cn('rounded-xl border bg-card', className)}>
+    <section data-toc={title} className={cn('scroll-mt-28 rounded-xl border bg-card 2xl:scroll-mt-20', className)}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">{title}</h2>
