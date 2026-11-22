@@ -607,6 +607,11 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 
 *Links → Berth*. Before pairing: what Berth (the Linux server panel of the same series) is, where to get it, and pairing in three steps (install Berth, enter Wharf's address in Berth and compare the certificate fingerprint, agree in Wharf). Once paired: open Berth without signing in again, and the pairing's scopes, user mapping and unpairing.
 
+### 6.23 Page contents and the setup wizard
+
+- Pages with many sections get a table of contents: on the right of wide screens, a strip of chips under the top bar elsewhere, following the scroll position.
+- The first-login wizard asks where the panel is opened from (home only / outside without a public IP / with one) and ends with the next useful things in that light: tunnel or public name, alerts, importing plugins, DDNS, pairing with Berth, accounts for family. *Setup wizard* in the user menu opens it again.
+
 ### 6.24 Remote access
 
 *Management → Remote access* gathers opening the panel from outside: one line on how it is reachable now (which names, which way, which regions), the three ways (Cloudflare Tunnel / orange cloud / direct) with the one that suits the line according to the public address check, the panel's names (moved here from Settings), and who may come in (access control and Cloudflare Access).
@@ -614,11 +619,6 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 ### 6.25 Undo
 
 After saving a change that can be restored (settings, users, device details, port forwards, router configuration …) a toast offers *Undo* for 10 seconds. Only the author can undo, within two minutes; older changes are restored by a super admin from the audit log.
-
-### 6.23 Page contents and the setup wizard
-
-- Pages with many sections get a table of contents: on the right of wide screens, a strip of chips under the top bar elsewhere, following the scroll position.
-- The first-login wizard asks where the panel is opened from (home only / outside without a public IP / with one) and ends with the next useful things in that light: tunnel or public name, alerts, importing plugins, DDNS, pairing with Berth, accounts for family. *Setup wizard* in the user menu opens it again.
 
 ---
 
