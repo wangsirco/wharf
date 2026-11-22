@@ -109,7 +109,7 @@ func (a *App) publicNames() []string {
 
 // passkeyHosts are the names passkeys can be used on.
 func (a *App) passkeyHosts() []string {
-	return append([]string{a.localPanelName()}, a.publicNames()...)
+	return append(append([]string{a.localPanelName()}, a.publicNames()...), a.tunnelPanelNames()...)
 }
 
 type panelRoute struct {

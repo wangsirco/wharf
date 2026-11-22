@@ -276,6 +276,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/v1/net") || strings.HasPrefix(r.URL.Path, "/v1/plugins") || strings.HasPrefix(r.URL.Path, "/v1/luci/") ||
 		strings.HasPrefix(r.URL.Path, "/v1/store") || r.URL.Path == "/v1/uci/guarded" || r.URL.Path == "/v1/uci/confirm" || r.URL.Path == "/v1/uci/rollback":
 		s.netAPI(w, r, body)
+	case r.Method == "GET" && r.URL.Path == "/v1/tunnel":
+		writeJSON(w, 200, GetTunnelStatus())
+	case r.Method == "POST" && r.URL.Path == "/v1/tunnel":
+		var req struct {
+			Action string `json:"action"`
+			Token  string `json:"token"`
+		}
+		_ = json.Unmarshal(body, &req)
+		var err error
+		if req.Action == "token" {
+			err = SetTunnelToken(req.Token)
+		} else {
+			err = StartTunnelAction(req.Action)
+		}
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, GetTunnelStatus())
 	case r.Method == "GET" && r.URL.Path == "/v1/dns/cache":
 		writeJSON(w, 200, GetDNSCache())
 	case r.Method == "POST" && r.URL.Path == "/v1/dns/trace":

@@ -115,6 +115,8 @@ func main() {
 		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	// Cloudflare Tunnel visitors arrive on a unix socket only cloudflared can open (panel/cftunnel.go)
+	go app.ServeTunnel(srv.Handler)
 	switch cfg.TLS {
 	case "off":
 		log.Printf("owp-panel listening on http://%s (TLS off: only use behind a TLS reverse proxy)", cfg.Listen)

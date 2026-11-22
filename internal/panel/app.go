@@ -76,6 +76,12 @@ func NewApp(cfg Config, db *sql.DB, web fs.FS) *App {
 
 // clientIP returns the peer address, or the forwarded address when the peer is a trusted proxy.
 func (a *App) clientIP(r *http.Request) string {
+	if fromTunnel(r) { // the tunnel socket: cloudflared says who
+		if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); net.ParseIP(v) != nil {
+			return v
+		}
+		return "0.0.0.0"
+	}
 	if v := a.cloudflareVisitor(r); v != "" { // a proxied panel name: Cloudflare says who (origincert.go)
 		return v
 	}

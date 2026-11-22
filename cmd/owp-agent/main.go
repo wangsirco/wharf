@@ -101,6 +101,7 @@ func main() {
 	}
 
 	agent.SetProxyDir(*dataDir)
+	agent.SetTunnelDir(*dataDir)
 	agent.SetIdentityDir(*dataDir)
 	go agent.RunIdentity()
 	go agent.RunProxyStats()

@@ -31,6 +31,8 @@ import Tools from '@/pages/tools'
 import ProxyPage from '@/pages/proxy'
 import DDNSPage from '@/pages/ddns'
 import PairBerth from '@/pages/pair-berth'
+import BerthPage from '@/pages/berth'
+import CloudflarePage from '@/pages/cloudflare'
 import Interfaces from '@/pages/interfaces'
 import DHCPPage from '@/pages/dhcp'
 import FirewallPage from '@/pages/firewall'
@@ -89,6 +91,8 @@ function Routed() {
         <Route path="visitors" element={superOnly(<Visitors />)} />
         <Route path="settings" element={superOnly(<SettingsPage />)} />
         <Route path="pair/berth" element={superOnly(<PairBerth />)} />
+        <Route path="berth" element={<BerthPage />} />
+        <Route path="cloudflare" element={superOnly(<CloudflarePage />)} />
         <Route path="interfaces" element={<Interfaces />} />
         <Route path="dhcp" element={<DHCPPage />} />
         <Route path="firewall" element={<FirewallPage />} />

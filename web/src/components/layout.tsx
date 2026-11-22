@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { TocBar, TocSide } from '@/components/page-toc'
 import { NetBanner } from '@/components/net-banner'
 import {
-  Activity, Anchor, ArrowLeftRight, ArrowUpCircle, Ban, BarChart3, BellRing, BrickWall, ClipboardCheck, Cpu, Earth, Globe, Inbox, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, Network, Puzzle, Rocket, ScrollText, Search as SearchIcon, Server, Settings, ShieldAlert, ShieldHalf, Sparkles, Sun, Users, Waypoints, Wrench, X,
+  Activity, Anchor, ArrowLeftRight, ArrowUpCircle, Ban, BarChart3, BellRing, BrickWall, ClipboardCheck, Cpu, Earth, Globe, Inbox, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, Network, Puzzle, Rocket, ScrollText, Search as SearchIcon, Server, Settings, ShieldAlert, ShieldHalf, Sparkles, Sun, Users, Waypoints, Wrench, X, Cloud,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth'
@@ -61,6 +61,13 @@ const nav: { title?: string; items: NavItem[] }[] = [
       { to: '/ddns', label: '动态域名 DDNS', icon: Waypoints, super: true },
       { to: '/access', label: '面板访问控制', icon: ShieldHalf, super: true },
       { to: '/settings', label: '系统设置', icon: Settings, super: true },
+    ],
+  },
+  {
+    title: '联动',
+    items: [
+      { to: '/cloudflare', label: 'Cloudflare', icon: Cloud, super: true },
+      { to: '/berth', label: 'Berth 服务器面板', icon: Anchor, super: true },
     ],
   },
 ]

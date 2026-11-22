@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Anchor, History, Loader2, Pencil, Play, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, post } from '@/lib/api'
@@ -335,7 +335,7 @@ interface CFRecord { id: string; type: string; name: string; content: string; pr
 
 function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
   const { data, reload } = useApi<CFState>('/cloudflare')
-  const [token, setToken] = useState('')
+
   const [busy, setBusy] = useState(false)
   const [zone, setZone] = useState('')
   const [sub, setSub] = useState('')
@@ -347,7 +347,7 @@ function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
   const zoneName = data.zones.find((z) => z.id === zone)?.name ?? ''
   const connect = async (t: string) => {
     setBusy(true)
-    try { await post('/cloudflare', { token: t }); setToken(''); toast.success(t ? '已连接 Cloudflare 账户' : '已断开'); reload() }
+    try { await post('/cloudflare', { token: t }); toast.success(t ? '已连接 Cloudflare 账户' : '已断开'); reload() }
     catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
   const add = async (domain: string, type: string) => {
@@ -368,16 +368,9 @@ function CloudflareAccount({ onAdded }: { onAdded: () => void }) {
     <Section title="Cloudflare 账户" desc="连接一次，就能直接选域名、新建或接管已有的解析记录，面板域名和证书也会用它。">
       <div className="grid gap-4 p-4">
         {!data.connected ? (
-          <div className="grid gap-3">
-            <ol className="list-decimal space-y-0.5 pl-5 text-sm">
-              <li><a className="text-primary underline" href={data.create_url} target="_blank" rel="noreferrer">打开 Cloudflare 创建令牌</a>（权限已经选好：读取区域、编辑 DNS、SSL 和证书；要让面板域名走橙色云，再手动加一行「区域 → Origin Rules → 编辑」；然后滚到最下面点「继续」→「创建令牌」）</li>
-              <li>复制生成的令牌，粘贴到下面</li>
-            </ol>
-            <div className="flex gap-2">
-              <Input type="password" autoComplete="off" placeholder="Cloudflare API 令牌" value={token} onChange={(e) => setToken(e.target.value.trim())} />
-              <Button disabled={busy || !token} onClick={() => connect(token)}>{busy && <Loader2 className="animate-spin" />}连接</Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Cloudflare 暂不支持让家用设备直接「用账号登录」（OAuth 需要固定的回调网址），所以用这个一键创建的令牌代替：只能读域名、改 DNS 和证书，随时可以在 Cloudflare 撤销。</p>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="text-muted-foreground">还没有连接 Cloudflare 账号。连上后可以直接选域名、新建或接管解析记录。</span>
+            <Button render={<Link to="/cloudflare" />}>去连接 Cloudflare</Button>
           </div>
         ) : (
           <>

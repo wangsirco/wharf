@@ -15,6 +15,15 @@ if [ -f /etc/init.d/wharf-proxy ]; then
 	case "$dir" in /*-proxy) rm -rf "$dir" ;; esac
 fi
 rm -rf /tmp/wharf-proxy
+# Cloudflare Tunnel: its service, cloudflared and the tunnel token
+if [ -f /etc/init.d/wharf-tunnel ]; then
+	dir="$(sed -n 's/^DIR=//p' /etc/init.d/wharf-tunnel)"
+	/etc/init.d/wharf-tunnel stop >/dev/null 2>&1
+	/etc/init.d/wharf-tunnel disable >/dev/null 2>&1
+	rm -f /etc/init.d/wharf-tunnel
+	case "$dir" in /*-tunnel) rm -rf "$dir" ;; esac
+fi
+rm -f /var/run/wharf-tunnel.sock
 iptables -w -t nat -D PREROUTING -j owp_pxy 2>/dev/null; iptables -w -t nat -F owp_pxy 2>/dev/null; iptables -w -t nat -X owp_pxy 2>/dev/null
 iptables -w -D INPUT -j owp_pxyin 2>/dev/null; iptables -w -F owp_pxyin 2>/dev/null; iptables -w -X owp_pxyin 2>/dev/null
 ipset destroy owp_pxy_skip 2>/dev/null
