@@ -207,6 +207,9 @@ var migrations = []string{
 	// v21: plugins taken over by Wharf, with their pages converted ahead of time (plugin_import.go)
 	`CREATE TABLE plugin_imports (pkg TEXT PRIMARY KEY, version TEXT NOT NULL, imported_at INTEGER NOT NULL, imported_by TEXT NOT NULL,
 		pages TEXT NOT NULL, refreshed_at INTEGER NOT NULL DEFAULT 0)`,
+	// v22: proxy traffic in 5-minute buckets for the last few days ("the last 3 hours"); hours stay in proxy_traffic
+	`CREATE TABLE proxy_traffic_5m (ts INTEGER NOT NULL, user_id INTEGER NOT NULL, node_id INTEGER NOT NULL, up INTEGER NOT NULL, down INTEGER NOT NULL,
+		PRIMARY KEY (ts, user_id, node_id))`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import qrcode from 'qrcode-generator'
 import {
-  Anchor, ArrowDown, ArrowUp, Ban, Download, Globe2, KeyRound, Link2, Loader2, MapPin, Pencil, Plus, QrCode, RefreshCw, Search,
+  Anchor, ArrowDown, ArrowUp, Ban, BarChart3, Download, Globe2, KeyRound, Link2, Loader2, MapPin, Pencil, Plus, QrCode, RefreshCw, Search,
   Server, ShieldCheck, Trash2, Users as UsersIcon, Zap,
 } from 'lucide-react'
 import { api, post } from '@/lib/api'
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout'
 import { Dot, Empty, ErrorBox, Field, HalfPanel, Pill, Section, useConfirm } from '@/components/common'
 import { AreaChart } from '@/components/chart'
+import { UsagePanel, type UsageTarget } from '@/components/proxy-usage'
 import { CopyText } from '@/pages/diag'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,6 +63,7 @@ interface Live { ts: number; total: Rate; nodes: Record<string, Rate>; users: Re
 interface Stats {
   since: number; series: Record<string, { hour: number; up: number; down: number }[]>
   nodes: Record<string, Rate>; users: Record<string, Rate>; today: Rate; month: Rate; range: Rate
+  life?: { nodes: Record<string, Rate>; users: Record<string, Rate> }
 }
 
 // ---- labels ----
@@ -219,6 +221,8 @@ function Overview({ data }: { data: ProxyResp }) {
   const { data: live } = useApi<Live>('/proxy/live', 3000)
   const [range, setRange] = useState('24h')
   const { data: stats } = useApi<Stats>(`/proxy/stats?range=${range}`, 60000)
+  const [usage, setUsage] = useState<UsageTarget | null>(null)
+  const rangeLabel = ({ '24h': '24 小时', '7d': '7 天', '30d': '30 天' } as Record<string, string>)[range] ?? range
   const [hist, setHist] = useState<{ t: number; up: number; down: number }[]>([])
   useEffect(() => {
     if (!live) return
@@ -266,7 +270,7 @@ function Overview({ data }: { data: ProxyResp }) {
               const r = live?.nodes[n.id], used = stats?.nodes[n.id]
               const users = new Set(Object.entries(live?.online ?? {}).filter(([, ips]) => ips.some((ip) => ip.nodes?.includes(n.id))).map(([u]) => u)).size
               return (
-                <div key={n.id} className="bg-card p-4">
+                <button type="button" key={n.id} className="bg-card p-4 text-left hover:bg-muted/40" title="查看这个节点的用量明细" onClick={() => setUsage({ kind: 'node', id: n.id, name: n.name })}>
                   <div className="flex items-center gap-2">
                     <Dot tone={!n.enabled ? 'off' : data.ext.running.xray ? 'ok' : 'bad'} />
                     <span className="truncate font-medium">{n.name}</span>
@@ -276,9 +280,13 @@ function Overview({ data }: { data: ProxyResp }) {
                   <div className="mt-3 grid grid-cols-3 gap-2 text-xs tabular-nums">
                     <div><div className="text-muted-foreground">↓ 下行</div><div className="text-sm font-semibold">{r ? bitrate(r.down) : '0 bps'}</div></div>
                     <div><div className="text-muted-foreground">↑ 上行</div><div className="text-sm font-semibold">{r ? bitrate(r.up) : '0 bps'}</div></div>
-                    <div><div className="text-muted-foreground">{range} 用量</div><div className="text-sm font-semibold">{used ? bytes(used.up + used.down) : '0 B'}</div></div>
+                    <div><div className="text-muted-foreground">{rangeLabel}用量</div><div className="text-sm font-semibold">{used ? bytes(used.up + used.down) : '0 B'}</div></div>
                   </div>
-                </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>建立以来共 {(() => { const l = stats?.life?.nodes[n.id]; return l ? bytes(l.up + l.down) : '0 B' })()}</span>
+                    <span className="text-primary">明细 ›</span>
+                  </div>
+                </button>
               )
             })}
           </div>
@@ -286,10 +294,11 @@ function Overview({ data }: { data: ProxyResp }) {
       </Section>
 
       <div className="grid items-start gap-4 xl:grid-cols-2">
-        <Section title="用量趋势" action={
+        <Section title="用量趋势" action={<div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setUsage({ kind: 'all', name: '全部节点' })}>按时段查看</Button>
           <Tabs value={range} onValueChange={(v) => setRange(String(v))}>
             <TabsList>{[['24h', '24 小时'], ['7d', '7 天'], ['30d', '30 天']].map(([k, l]) => <TabsTrigger key={k} value={k} className="px-3">{l}</TabsTrigger>)}</TabsList>
-          </Tabs>
+          </Tabs></div>
         }>
           <div className="p-4">
             {series.length > 1 ? (
@@ -300,11 +309,11 @@ function Overview({ data }: { data: ProxyResp }) {
               <div className="mt-4 grid gap-2">
                 <div className="text-xs font-medium text-muted-foreground">用量最多的用户</div>
                 {topUsers.map((u) => (
-                  <div key={u.id} className="grid grid-cols-[7rem_1fr_5rem] items-center gap-2 text-xs">
+                  <button type="button" key={u.id} onClick={() => setUsage({ kind: 'user', id: u.id, name: userName(u.id) })} className="grid grid-cols-[7rem_1fr_5rem] items-center gap-2 rounded text-left text-xs hover:bg-muted/50">
                     <span className="truncate">{userName(u.id)}</span>
                     <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary/70" style={{ width: `${(u.total / maxUser) * 100}%` }} /></div>
                     <span className="text-right tabular-nums text-muted-foreground">{bytes(u.total)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -339,6 +348,7 @@ function Overview({ data }: { data: ProxyResp }) {
           )}
         </Section>
       </div>
+      <UsagePanel target={usage} onClose={() => setUsage(null)} onOpen={setUsage} />
     </div>
   )
 }
@@ -372,6 +382,8 @@ const blankNode: NodeForm = { name: '', enabled: true, protocol: 'vless', transp
 
 function Nodes({ data, reload }: { data: ProxyResp; reload: () => void }) {
   const [edit, setEdit] = useState<NodeForm | null>(null)
+  const [usage, setUsage] = useState<UsageTarget | null>(null)
+  const { data: stats } = useApi<Stats>('/proxy/stats?range=24h', 60000)
   const { confirm, dialog } = useConfirm()
   const { isSuper, user } = useAuth()
   const mine = data.nodes
@@ -404,7 +416,12 @@ function Nodes({ data, reload }: { data: ProxyResp; reload: () => void }) {
                     <div className="truncate text-xs text-muted-foreground">{nodeDesc(n)} · {entryDesc(n)}{n.note ? ` · ${n.note}` : ''}</div>
                   </button>
                   <span className="text-xs text-muted-foreground"><UsersIcon className="mr-1 inline size-3.5" />{users} 个用户</span>
+                  <button type="button" className="text-right text-xs text-muted-foreground hover:text-foreground" title="查看用量明细" onClick={() => setUsage({ kind: 'node', id: n.id, name: n.name })}>
+                    <div className="tabular-nums">24 小时 {(() => { const r = stats?.nodes[n.id]; return r ? bytes(r.up + r.down) : '0 B' })()}</div>
+                    <div className="tabular-nums">建立以来 {(() => { const r = stats?.life?.nodes[n.id]; return r ? bytes(r.up + r.down) : '0 B' })()}</div>
+                  </button>
                   <div className="flex">
+                    <Button variant="ghost" size="icon-sm" title="用量明细" onClick={() => setUsage({ kind: 'node', id: n.id, name: n.name })}><BarChart3 /></Button>
                     <Button variant="ghost" size="icon-sm" title="修改" onClick={() => setEdit({ ...n, params: { ...n.params } })}><Pencil /></Button>
                     <Button variant="ghost" size="icon-sm" title="删除" onClick={() => del(n)}><Trash2 /></Button>
                   </div>
@@ -415,6 +432,7 @@ function Nodes({ data, reload }: { data: ProxyResp; reload: () => void }) {
         )}
       </Section>
       <NodeEditor value={edit} onChange={setEdit} data={data} onSaved={() => { setEdit(null); reload() }} />
+      <UsagePanel target={usage} onClose={() => setUsage(null)} onOpen={setUsage} />
       {dialog}
     </>
   )
@@ -549,7 +567,9 @@ function ProxyUsers({ data, reload }: { data: ProxyResp; reload: () => void }) {
   const [edit, setEdit] = useState<UserForm | null>(null)
   const [links, setLinks] = useState<PUser | null>(null)
   const [ips, setIPs] = useState<PUser | null>(null)
+  const [usage, setUsage] = useState<UsageTarget | null>(null)
   const { data: live } = useApi<Live>('/proxy/live', 10000)
+  const { data: stats } = useApi<Stats>('/proxy/stats?range=24h', 60000)
   const { confirm, dialog } = useConfirm()
   const { isSuper, user } = useAuth()
   const fullUsers = data.quota.users >= 0 && data.users.filter((u) => u.owner_id === user?.id).length >= data.quota.users
@@ -587,9 +607,13 @@ function ProxyUsers({ data, reload }: { data: ProxyResp; reload: () => void }) {
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                       <div className={cn('h-full rounded-full', u.limit_bytes && used / u.limit_bytes > 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${u.limit_bytes ? Math.min(100, (used / u.limit_bytes) * 100) : used ? 100 : 0}%`, opacity: u.limit_bytes ? 1 : 0.35 }} />
                     </div>
-                    {u.reset_day > 0 && <div className="mt-0.5 text-[10px] text-muted-foreground">每月 {u.reset_day} 日清零</div>}
+                    <div className="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+                      <span>{u.reset_day > 0 ? `每月 ${u.reset_day} 日清零` : u.limit_bytes ? '本期已用' : '已用'}</span>
+                      <span>累计 {(() => { const r = stats?.life?.users[u.id]; return r ? bytes(r.up + r.down) : '0 B' })()}</span>
+                    </div>
                   </div>
                   <div className="flex">
+                    <Button variant="ghost" size="icon-sm" title="用量明细" onClick={() => setUsage({ kind: 'user', id: u.id, name: u.name })}><BarChart3 /></Button>
                     <Button variant="ghost" size="icon-sm" title="链接与二维码" onClick={() => setLinks(u)}><QrCode /></Button>
                     <Button variant="ghost" size="icon-sm" title="来源 IP" onClick={() => setIPs(u)}><Globe2 /></Button>
                     <Button variant="ghost" size="icon-sm" title="修改" onClick={() => setEdit({ ...u })}><Pencil /></Button>
@@ -604,6 +628,7 @@ function ProxyUsers({ data, reload }: { data: ProxyResp; reload: () => void }) {
       <UserEditor value={edit} onChange={setEdit} data={data} onSaved={() => { setEdit(null); reload() }} />
       <LinksDialog user={links} onClose={() => setLinks(null)} />
       <IPsPanel user={ips} onClose={() => setIPs(null)} />
+      <UsagePanel target={usage} onClose={() => setUsage(null)} onOpen={setUsage} />
       {dialog}
     </>
   )

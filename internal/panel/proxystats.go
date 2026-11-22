@@ -73,6 +73,7 @@ func (a *App) proxyLoop() {
 			_, _ = a.db.Exec(`DELETE FROM proxy_access WHERE ts < ?`, time.Now().Unix()-int64(days)*86400)
 			_, _ = a.db.Exec(`DELETE FROM proxy_access WHERE id <= (SELECT id FROM proxy_access ORDER BY id DESC LIMIT 1 OFFSET 2000000)`)
 			_, _ = a.db.Exec(`DELETE FROM proxy_traffic WHERE hour < ?`, time.Now().Unix()-400*86400)
+			_, _ = a.db.Exec(`DELETE FROM proxy_traffic_5m WHERE ts < ?`, time.Now().Unix()-fineKeep)
 			_, _ = a.db.Exec(`DELETE FROM proxy_ips WHERE last < ?`, time.Now().Unix()-int64(days)*86400)
 		}
 	}
@@ -94,6 +95,8 @@ func (a *App) storeProxyMinutes(mins []proxyMinute) int64 {
 			}
 			_, _ = tx.Exec(`INSERT INTO proxy_traffic(hour, user_id, node_id, up, down) VALUES(?,?,?,?,?)
 				ON CONFLICT(hour, user_id, node_id) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, hour, uid, nid, d[0], d[1])
+			_, _ = tx.Exec(`INSERT INTO proxy_traffic_5m(ts, user_id, node_id, up, down) VALUES(?,?,?,?,?)
+				ON CONFLICT(ts, user_id, node_id) DO UPDATE SET up=up+excluded.up, down=down+excluded.down`, m.Minute/300*300, uid, nid, d[0], d[1])
 			_, _ = tx.Exec(`UPDATE proxy_users SET used_up=used_up+?, used_down=used_down+? WHERE id=?`, d[0], d[1], uid)
 		}
 		for _, x := range m.Access {
@@ -502,7 +505,19 @@ func (a *App) handleProxyStats(w http.ResponseWriter, r *http.Request) {
 		}
 		out[nid] = list
 	}
-	writeJSON(w, 200, map[string]any{"since": since, "series": out, "nodes": nodeTot, "users": userTot, "today": today, "month": month, "range": rng})
+	lifeN, lifeU := a.proxyLifetime()
+	life := map[string]map[int64]usagePoint{"nodes": {}, "users": {}}
+	for id, p := range lifeN {
+		if v.nodes[id] != nil {
+			life["nodes"][id] = p
+		}
+	}
+	for id, p := range lifeU {
+		if v.users[id] != nil {
+			life["users"][id] = p
+		}
+	}
+	writeJSON(w, 200, map[string]any{"since": since, "series": out, "nodes": nodeTot, "users": userTot, "today": today, "month": month, "range": rng, "life": life})
 }
 
 func dayStartOf(ts int64) int64 {

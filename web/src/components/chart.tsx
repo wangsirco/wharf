@@ -3,8 +3,8 @@ import { useMemo, useState } from 'react'
 export interface Series { label: string; color: string; values: number[] }
 
 // AreaChart: small dependency-free live chart (shared x axis, auto y scale).
-export function AreaChart({ series, height = 180, format, times }: {
-  series: Series[]; height?: number; format: (v: number) => string; times?: number[]
+export function AreaChart({ series, height = 180, format, times, timeLabel }: {
+  series: Series[]; height?: number; format: (v: number) => string; times?: number[]; timeLabel?: (t: number) => string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const n = Math.max(0, ...series.map((s) => s.values.length))
@@ -35,7 +35,7 @@ export function AreaChart({ series, height = 180, format, times }: {
       {hover !== null && (
         <div className="pointer-events-none absolute top-2 rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-sm"
           style={{ left: `min(calc(${(hover / Math.max(1, n - 1)) * 100}% + 8px), calc(100% - 9rem))` }}>
-          {times?.[hover] && <div className="mb-0.5 text-muted-foreground">{new Date(times[hover] * 1000).toLocaleTimeString()}</div>}
+          {times?.[hover] && <div className="mb-0.5 text-muted-foreground">{timeLabel ? timeLabel(times[hover]) : new Date(times[hover] * 1000).toLocaleTimeString()}</div>}
           {series.map((s) => (
             <div key={s.label} className="flex items-center gap-1.5">
               <span className="size-2 rounded-full" style={{ background: s.color }} />{s.label}

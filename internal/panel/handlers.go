@@ -114,6 +114,7 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("GET /api/proxy", a.auth("proxy.manage", a.handleProxy))
 	m.HandleFunc("GET /api/proxy/live", a.auth("proxy.manage", a.handleProxyLive))
 	m.HandleFunc("GET /api/proxy/stats", a.auth("proxy.manage", a.handleProxyStats))
+	m.HandleFunc("GET /api/proxy/usage", a.auth("proxy.manage", a.handleProxyUsage))
 	m.HandleFunc("GET /api/proxy/access", a.auth("proxy.manage", a.handleProxyAccess))
 	m.HandleFunc("GET /api/proxy/users/{id}/links", a.auth("proxy.manage", a.handleProxyLinks))
 	m.HandleFunc("GET /api/proxy/users/{id}/ips", a.auth("proxy.manage", a.handleProxyIPs))
