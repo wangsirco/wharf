@@ -62,7 +62,9 @@ export default function DHCPPage() {
 
   return (
     <div className="grid gap-4">
-      <PageHeader title="DHCP 与 DNS" desc="给家里设备分配地址的规则、固定 IP，以及路由器去哪里解析域名。" />
+      <PageHeader title="DHCP 与 DNS" desc="给家里设备分配地址的规则、固定 IP，以及路由器去哪里解析域名。">
+        {can('traffic.view') && <Button variant="ghost" size="sm" render={<Link to="/dns" />}>NextDNS 统计</Button>}
+      </PageHeader>
       {error && <ErrorBox>{error}</ErrorBox>}
 
       <Section title="地址池" desc="每个局域网接口给设备自动分配的地址范围。" action={manage && missing.length > 0 && <Button size="sm" variant="outline" onClick={() => setPool('new')}><Plus /> 为接口开启 DHCP</Button>}>
@@ -199,7 +201,7 @@ function DNSCard({ d, manage, onSaved }: { d: DnsCfg; manage: boolean; onSaved: 
           )}
           {sw('filter_aaaa', '不返回 IPv6 地址', '没有 IPv6 时可减少等待')}
           {sw('localservice', '只服务本地网络', '不回答来自外网的查询（建议开启）')}
-          {d.logqueries && <p className="text-xs text-muted-foreground">查询日志由 Wharf 的「DNS 拦截」统计使用，在这里不显示开关。</p>}
+          {d.logqueries && <p className="text-xs text-muted-foreground">查询日志由 Wharf 的「NextDNS 统计」和设备画像使用，在这里不显示开关。</p>}
         </div>
       </div>
       {manage && dirty && (

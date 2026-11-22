@@ -1,5 +1,11 @@
 # Changelog · 更新日志
 
+## 0.23.0 — Remote access in one place, menu groups, undo · 外网访问、菜单分组、撤销
+
+- Remote access page: how the panel is reachable from outside right now, the three ways (Cloudflare Tunnel / orange cloud / direct) with the one that suits the line (from the public address check), the panel's names, and who may come in (access control, Cloudflare Access). Panel names moved here from Settings · 外网访问页
+- Menu in groups: home network, control, tools, router, management, links; "DNS 拦截" is now "NextDNS 统计", linked both ways with DHCP / DNS; search finds the new pages and DNS cache · 菜单分组与改名
+- Undo: after saving a change that can be restored, a toast offers to take it back (the author, within two minutes) · 保存后可一键撤销
+
 ## 0.22.0 — Cloudflare, Berth, page contents, proxy usage · Cloudflare、Berth、页内目录、代理用量
 
 - Cloudflare page: a token in two steps with every permission explained and checked; Cloudflare Tunnel (cloudflared from Cloudflare's releases, run as nobody; the panel and home services published without opening a port, visitor addresses trusted through a socket only cloudflared can open); domains with attack mode, cache purge and a week of edge statistics; Access email codes in front of the panel. Other tools' objects in the same account (Berth's) are read-only · Cloudflare 独立菜单：隧道、防攻击、Access

@@ -55,7 +55,7 @@ export default function DNS() {
   if (data && !data.configured) {
     return (
       <>
-        <PageHeader title="DNS 与 NextDNS" />
+        <PageHeader title="NextDNS 统计" />
         <div className="rounded-xl border bg-card p-6 text-sm">
           <p>尚未连接 NextDNS。{data.error}</p>
           {isSuper ? <p className="mt-2"><Link to="/settings" className="text-primary underline">前往「系统设置 → NextDNS」</Link>填写 API Key。</p> : <p className="mt-2 text-muted-foreground">请联系超级管理员配置。</p>}
@@ -79,10 +79,11 @@ export default function DNS() {
 
   return (
     <>
-      <PageHeader title="DNS 与 NextDNS" desc={`NextDNS profile ${data?.profile ?? ''} · 拦截原因、全网查询统计与最近记录`}>
+      <PageHeader title="NextDNS 统计" desc={`NextDNS profile ${data?.profile ?? ''} · 拦截原因、全网查询统计与最近记录`}>
         <Tabs value={range} onValueChange={(v) => setRange(String(v))}>
           <TabsList><TabsTrigger value="1h">1 小时</TabsTrigger><TabsTrigger value="1d">24 小时</TabsTrigger><TabsTrigger value="7d">7 天</TabsTrigger><TabsTrigger value="30d">30 天</TabsTrigger></TabsList>
         </Tabs>
+        <Button variant="ghost" size="sm" render={<Link to="/dhcp" />}>DNS 设置与缓存</Button>
       </PageHeader>
       {data?.error && <div className="mb-4"><ErrorBox>{data.error}</ErrorBox></div>}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">

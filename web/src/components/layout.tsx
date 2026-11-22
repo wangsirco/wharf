@@ -26,19 +26,30 @@ interface NavItem { to: string; label: string; icon: typeof Activity; perm?: str
 
 const nav: { title?: string; items: NavItem[] }[] = [
   {
+    title: '家里网络',
     items: [
       { to: '/', label: '概览', icon: LayoutDashboard, perm: 'dashboard.view' },
       { to: '/network', label: '网络', icon: Activity, perm: 'dashboard.view' },
       { to: '/devices', label: '设备', icon: Monitor, perm: 'devices.view' },
       { to: '/traffic', label: '流量统计', icon: BarChart3, perm: 'traffic.view' },
       { to: '/world', label: '全球流量', icon: Earth, perm: 'traffic.view' },
-      { to: '/dns', label: 'DNS 拦截', icon: ShieldAlert, perm: 'traffic.view' },
+      { to: '/dns', label: 'NextDNS 统计', icon: ShieldAlert, perm: 'traffic.view' },
+    ],
+  },
+  {
+    title: '控制',
+    items: [
       { to: '/forwards', label: '端口转发', icon: ArrowLeftRight, perm: 'forwards.view' },
       { to: '/proxy', label: '代理', icon: Rocket, perm: 'proxy.manage' },
       { to: '/controls', label: '设备管控', icon: Ban, perm: 'access.manage' },
+      { to: '/requests', label: '我的申请', icon: Inbox },
+    ],
+  },
+  {
+    title: '工具',
+    items: [
       { to: '/tools', label: '网络工具', icon: Wrench, perm: 'tools.diag|tools.capture|tools.wol|system.view' },
       { to: '/system', label: '系统维护', icon: Cpu, perm: 'system.view' },
-      { to: '/requests', label: '我的申请', icon: Inbox },
     ],
   },
   {
@@ -58,8 +69,9 @@ const nav: { title?: string; items: NavItem[] }[] = [
       { to: '/audit', label: '操作审计', icon: ScrollText, super: true },
       { to: '/visitors', label: '访问记录', icon: Globe, super: true },
       { to: '/alerts', label: '告警推送', icon: BellRing, super: true },
-      { to: '/ddns', label: '动态域名 DDNS', icon: Waypoints, super: true },
+      { to: '/remote', label: '外网访问', icon: Earth, super: true },
       { to: '/access', label: '面板访问控制', icon: ShieldHalf, super: true },
+      { to: '/ddns', label: '动态域名 DDNS', icon: Waypoints, super: true },
       { to: '/settings', label: '系统设置', icon: Settings, super: true },
     ],
   },

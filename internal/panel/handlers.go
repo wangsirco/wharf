@@ -138,6 +138,8 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/users/{id}/password", a.super(a.handleUserPassword))
 	m.HandleFunc("GET /api/audit", a.super(a.handleAuditList))
 	m.HandleFunc("POST /api/audit/{id}/restore", a.super(a.handleAuditRestore))
+	m.HandleFunc("GET /api/audit/undo", a.auth("", a.handleUndoable))
+	m.HandleFunc("POST /api/audit/{id}/undo", a.auth("", a.handleUndo))
 	m.HandleFunc("GET /api/approvals", a.super(a.handleApprovals))
 	m.HandleFunc("POST /api/approvals/{id}/{decision}", a.super(a.handleApprovalDecide))
 	m.HandleFunc("GET /api/visitors", a.super(a.handleVisitors))

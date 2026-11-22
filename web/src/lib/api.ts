@@ -30,8 +30,12 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
     if (res.status === 401 && !path.startsWith('/login') && !path.startsWith('/me')) onUnauthorized()
     throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {})
   }
+  if (method !== 'GET' && !quiet.some((q) => path.startsWith(q))) window.dispatchEvent(new Event('owp:mutated'))
   return data as T
 }
+
+// writes that never produce something to undo (sign-in, the wizard flag, undo itself …)
+const quiet = ['/login', '/logout', '/me/onboarded', '/audit/', '/plugins/import/page', '/net/confirm', '/net/rollback', '/passkey', '/webauthn']
 
 export const get = <T,>(p: string) => api<T>('GET', p)
 export const post = <T,>(p: string, b: unknown = {}) => api<T>('POST', p, b)

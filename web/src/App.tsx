@@ -33,6 +33,8 @@ import DDNSPage from '@/pages/ddns'
 import PairBerth from '@/pages/pair-berth'
 import BerthPage from '@/pages/berth'
 import CloudflarePage from '@/pages/cloudflare'
+import RemotePage from '@/pages/remote'
+import { UndoWatcher } from '@/components/undo'
 import Interfaces from '@/pages/interfaces'
 import DHCPPage from '@/pages/dhcp'
 import FirewallPage from '@/pages/firewall'
@@ -93,6 +95,7 @@ function Routed() {
         <Route path="pair/berth" element={superOnly(<PairBerth />)} />
         <Route path="berth" element={<BerthPage />} />
         <Route path="cloudflare" element={superOnly(<CloudflarePage />)} />
+        <Route path="remote" element={superOnly(<RemotePage />)} />
         <Route path="interfaces" element={<Interfaces />} />
         <Route path="dhcp" element={<DHCPPage />} />
         <Route path="firewall" element={<FirewallPage />} />
@@ -112,6 +115,7 @@ export default function App() {
         <ModeProvider>
           <Routed />
           <Welcome />
+          <UndoWatcher />
         </ModeProvider>
         <Toaster position="top-center" richColors />
       </AuthProvider>

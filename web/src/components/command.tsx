@@ -21,7 +21,8 @@ const PAGES: { to: string; label: string; perm?: string; super?: boolean; kw: st
   { to: '/devices', label: '设备', perm: 'devices.view', kw: 'devices shebei' },
   { to: '/traffic', label: '流量统计', perm: 'traffic.view', kw: 'traffic liuliang' },
   { to: '/world', label: '全球流量地图', perm: 'traffic.view', kw: 'world map ditu quanqiu' },
-  { to: '/dns', label: 'DNS 与 NextDNS', perm: 'traffic.view', kw: 'dns nextdns lanjie' },
+  { to: '/dns', label: 'NextDNS 统计（拦截原因 / 查询记录）', perm: 'traffic.view', kw: 'dns nextdns lanjie tongji' },
+  { to: '/dhcp#sec-' + encodeURIComponent('DNS 缓存与排查').replace(/%/g, '').slice(0, 40), label: 'DNS 缓存与排查（刷新 DNS 缓存）', perm: 'network.view', kw: 'dns cache huancun shuaxin flush jiexi' },
   { to: '/alerts', label: '告警推送', super: true, kw: 'alerts gaojing telegram serverchan' },
   { to: '/forwards', label: '端口转发', perm: 'forwards.view', kw: 'forward port zhuanfa' },
   { to: '/controls', label: '设备管控', perm: 'access.manage', kw: 'control block duanwang guankong' },
@@ -33,6 +34,10 @@ const PAGES: { to: string; label: string; perm?: string; super?: boolean; kw: st
   { to: '/visitors', label: '访问记录', super: true, kw: 'visitors fangwen' },
   { to: '/access', label: '面板访问控制', super: true, kw: 'access' },
   { to: '/settings', label: '系统设置', super: true, kw: 'settings shezhi' },
+  { to: '/remote', label: '外网访问（从外面打开面板）', super: true, kw: 'remote waiwang gongwang yuming domain tunnel suidao chengseyun' },
+  { to: '/cloudflare', label: 'Cloudflare（隧道 / 防攻击 / Access）', super: true, kw: 'cloudflare cf tunnel suidao attack access' },
+  { to: '/berth', label: 'Berth 服务器面板', super: true, kw: 'berth bowei server fuwuqi' },
+  { to: '/ddns', label: '动态域名 DDNS', super: true, kw: 'ddns dongtai yuming' },
 ]
 
 export function CommandPalette() {

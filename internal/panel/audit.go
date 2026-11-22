@@ -147,6 +147,56 @@ func (a *App) handleAuditRestore(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, err.Error())
 		return
 	}
+	a.restoreEntry(w, r, e, req.Force)
+}
+
+// undoWindow: how long after a change its author can take it back with one click.
+const undoWindow = 2 * time.Minute
+
+// GET /api/audit/undo?since=<unix> — the caller's own latest change that can be taken
+// back (made since "since", at most undoWindow ago), for the "撤销" button after saving.
+func (a *App) handleUndoable(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	floor := time.Now().Add(-undoWindow).Unix()
+	if since-2 > floor {
+		floor = since - 2
+	}
+	rows, err := a.queryAudit(`WHERE user_id=? AND restorable=1 AND restored_at IS NULL AND restore_of IS NULL AND ts>=? ORDER BY id DESC LIMIT 1`, u.ID, floor)
+	if err != nil || len(rows) == 0 {
+		writeJSON(w, 200, map[string]any{})
+		return
+	}
+	e := rows[0]
+	writeJSON(w, 200, map[string]any{"id": e.ID, "summary": e.Summary, "ts": e.TS})
+}
+
+// POST /api/audit/{id}/undo — take back one's own change within undoWindow (no super needed).
+func (a *App) handleUndo(w http.ResponseWriter, r *http.Request) {
+	e, err := a.getAudit(pathID(r))
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	u := currentUser(r)
+	if e.UserID != u.ID {
+		jsonErr(w, 403, "只能撤销自己的改动")
+		return
+	}
+	if time.Since(time.Unix(e.TS, 0)) > undoWindow {
+		jsonErr(w, 400, "已经超过两分钟，请超级管理员在「操作审计」里还原")
+		return
+	}
+	if e.RestoredAt != nil {
+		jsonErr(w, 400, "这次改动已经撤销过了")
+		return
+	}
+	a.restoreEntry(w, r, e, false)
+}
+
+func (a *App) restoreEntry(w http.ResponseWriter, r *http.Request, e *AuditEntry, force bool) {
+	req := struct{ Force bool }{force}
+	var err error
 	if !e.Restorable {
 		jsonErr(w, 400, "该记录不支持还原")
 		return
