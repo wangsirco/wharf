@@ -638,7 +638,7 @@ func DNSFlush(targets []string) ([]FlushResult, error) {
 
 // SetNextDNSMaxAge sets how long NextDNS may keep any cached answer, then restarts it.
 func SetNextDNSMaxAge(v string) error {
-	ok := map[string]bool{"0s": true, "1m": true, "5m": true, "15m": true, "1h": true}
+	ok := map[string]bool{"0s": true, "1m": true, "5m": true, "10m": true, "15m": true, "30m": true, "1h": true}
 	if !ok[v] {
 		return fmt.Errorf("不支持的时长 %q", v)
 	}

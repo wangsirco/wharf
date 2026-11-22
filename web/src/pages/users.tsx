@@ -140,7 +140,7 @@ function UserPanel({ meta, target, onClose, onSaved }: { meta: Meta; target: Use
             {form.perms.includes('forwards.manage') && (
               <GrantsEditor key={u?.id ?? 'new'} userId={u?.id} value={form.grants} onChange={(g) => setForm((f) => ({ ...f, grants: g }))} />
             )}
-            {!isNew && (
+            {u && (
               <label className="flex items-center justify-between rounded-xl border p-4">
                 <span><span className="text-sm font-medium">停用账号</span><span className="block text-xs text-muted-foreground">停用后立即退出所有登录，无法再登录</span></span>
                 <Switch checked={form.disabled} onCheckedChange={(c) => setForm({ ...form, disabled: !!c })} />
@@ -149,10 +149,10 @@ function UserPanel({ meta, target, onClose, onSaved }: { meta: Meta; target: Use
           </>
         )}
 
-        {!isNew && (
+        {u && (
           <div className="grid gap-3">
             <h3 className="text-sm font-semibold">重置密码</h3>
-            <p className="text-xs text-muted-foreground">登录方式：{loginModeNames[u!.login_mode]}。{u!.login_mode !== 'password' && '重置后恢复为「密码或 Passkey」，丢了 Passkey 时可以这样找回。'}</p>
+            <p className="text-xs text-muted-foreground">登录方式：{loginModeNames[u.login_mode] ?? u.login_mode}。{u.login_mode !== 'password' && '重置后恢复为「密码或 Passkey」，丢了 Passkey 时可以这样找回。'}</p>
             <div className="flex gap-2">
               <Input type="password" autoComplete="new-password" placeholder="新密码（至少 8 位）" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
               <Button variant="outline" disabled={busy || newPw.length < 8} onClick={resetPw}>重置</Button>

@@ -4,7 +4,8 @@
 
 - DHCP / DNS page: the resolver chain with cache sizes and hit rate; look a name up through every layer (dnsmasq, NextDNS on the router, NextDNS cloud, 1.1.1.1, the authoritative servers) to see which one is stale — a cached "does not exist", an old address, the NextDNS cloud, rebind protection (allow in one click), a NextDNS block, or no such record · 逐层查询，指出卡在哪一层
 - Refresh DNS cache: dnsmasq (without interruption) and NextDNS (restart, about a second); audited · 一键刷新 DNS 缓存
-- NextDNS maximum cache age, so new records show up at home within minutes instead of the zone's 30-minute negative TTL · NextDNS 缓存最长保留
+- NextDNS maximum cache age (1 min – 1 h, 15 min as a middle ground; default unchanged), so new records need not wait for the zone's 30-minute negative TTL · NextDNS 缓存最长保留
+- Fix: the users page crashed ("Cannot read properties of null (reading 'login_mode')") · 修复「用户与权限」页报错
 
 ## 0.21.0 — Public address check, plugin import · 公网检测、插件导入
 

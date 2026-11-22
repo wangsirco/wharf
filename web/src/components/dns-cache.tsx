@@ -23,7 +23,7 @@ interface FlushRes { results: { target: string; ok: boolean; ms: number; error?:
 
 const KIND: Record<string, string> = { nextdns: 'NextDNS', smartdns: 'SmartDNS', adguardhome: 'AdGuard Home', mosdns: 'MosDNS', openclash: 'OpenClash', local: '本地程序', remote: '外部 DNS' }
 const AGES = [
-  { v: '0s', label: '跟随记录（默认）' }, { v: '1m', label: '1 分钟' }, { v: '5m', label: '5 分钟' }, { v: '15m', label: '15 分钟' }, { v: '1h', label: '1 小时' },
+  { v: '0s', label: '跟随记录（默认）' }, { v: '1m', label: '1 分钟' }, { v: '5m', label: '5 分钟' }, { v: '10m', label: '10 分钟' }, { v: '15m', label: '15 分钟（折中）' }, { v: '30m', label: '30 分钟' }, { v: '1h', label: '1 小时' },
 ]
 
 const dur = (s: number) => (s >= 3600 ? `${Math.round(s / 360) / 10} 小时` : s >= 60 ? `${Math.round(s / 60)} 分钟` : `${s} 秒`)
@@ -179,7 +179,7 @@ export function DNSCacheCard({ manage, onRebindAllow }: { manage: boolean; onReb
               {busy === 'age' && <Loader2 className="size-4 animate-spin" />}
             </div>
             <p className="text-xs text-muted-foreground">
-              默认按每条记录自己的时间缓存：Cloudflare 上的域名，「不存在」会被记 30 分钟，正常记录一般 5 分钟。常新建子域名的话设成 5 分钟，新记录最多等 5 分钟就能在家里打开，不用手动刷新；代价是 NextDNS 更常去云端查，命中率略降、个别网页首次打开慢几十毫秒。
+              默认按每条记录自己的时间缓存：Cloudflare 上的域名，「不存在」会被记 30 分钟，正常记录一般 5 分钟。设得越短，新建的记录越快在家里生效，但 NextDNS 越常去云端查，命中率略降、个别网页首次打开慢几十毫秒。想折中可选 15 分钟：「不存在」最多记 15 分钟（默认是 30 分钟），只有缓存时间超过 15 分钟的记录会提早去云端重查，命中率影响很小。偶尔新建域名，用上面的「刷新 DNS 缓存」更直接。
             </p>
           </div>
         )}
