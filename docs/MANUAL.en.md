@@ -650,6 +650,12 @@ The overview starts by saying whether things are fine: "一切正常 · 23 devic
 - Tables (visitor log, audit log, NextDNS statistics, traffic, device controls) become cards with labelled fields.
 - A bar at the bottom of the screen: overview, devices, cut off (device controls), refresh DNS, open Berth (search when not paired).
 
+### 6.30 Access addresses: one name at home, one outside, no ports
+
+*Settings → Remote access & links → Access addresses*: the LAN address (`https://wharf.lan` by default, can be renamed — passkeys added on the old name must be added again), with *Without a port (recommended)*: the router's 443 is shared so the panel's names go to Wharf and everything else (LuCI by IP) stays with LuCI. The card checks whether this device can open the name and, if not, shows how to trust the certificate on Mac, iPhone, Windows, Android or Linux. The public address comes from *Remote access*; the fallback `https://<router IP>:7080` is folded away. Opened by IP or an old name, the panel moves to the LAN name when this device can open it, otherwise a bar says how to fix it. The setup wizard has a step for this, on by default.
+
+Pairing with Berth starts with *same LAN* (both use LAN names) or *public* (both use public names); switch later without pairing again. The link uses that pair only and says which name and which step fails. *Open Berth* picks Berth's LAN or public name from where the panel was opened, asking (with "remember for this device") when unsure. The new scope *statistics* lets Berth's overview show Wharf's devices, traffic, visitors and DNS figures (read only).
+
 ---
 
 ## 7. Multiple admins and permissions

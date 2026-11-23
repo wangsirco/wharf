@@ -183,13 +183,37 @@ interface Conn { kind: 'lan' | 'tailscale' | 'public'; via: string; url: string;
 const VIA: Record<string, string> = { direct: '直连', cloudflare: '经 Cloudflare', cloudfront: '经 CloudFront', fastly: '经 Fastly', proxy: '经代理' }
 const zhRegion = typeof Intl !== 'undefined' && 'DisplayNames' in Intl ? new Intl.DisplayNames(['zh-CN'], { type: 'region' }) : null
 
-// BerthConn: how Wharf reaches Berth right now, measured every 30 s while shown.
+// BerthConn: how Wharf reaches Berth right now, measured every 30 s while shown. With a v3
+// Berth the link uses one pair of names (LAN or public) and never switches by itself.
+interface ConnResp { conn: Conn | null; urls: string[]; key_auth: boolean; mode: '' | 'lan' | 'public'; peer_lan: string; peer_public: string; peer_protocol: number; wharf: { lan: string; public: string } }
+
 export function BerthConn() {
-  const { data } = useApi<{ conn: Conn | null; urls: string[]; key_auth: boolean }>('/berth/conn', 30000)
+  const { data, reload } = useApi<ConnResp>('/berth/conn', 30000)
+  const [busy, setBusy] = useState(false)
   const c = data?.conn
   if (!data) return <span className="text-xs text-muted-foreground">正在测量…</span>
   if (!c) return null
-  if (c.error) return <span className="flex items-center gap-1 text-sm text-destructive"><AlertTriangle className="size-4" />{c.error}</span>
+  const v3 = data.peer_protocol >= 3 && !!data.mode
+  const modeLabel = data.mode === 'public' ? '公网互联' : '内网互联'
+  const other = data.mode === 'public' ? 'lan' : 'public'
+  const canSwitch = v3 && (other === 'lan' ? !!data.peer_lan : !!data.peer_public)
+  const switchMode = async () => {
+    setBusy(true)
+    try { await post('/berth/mode', { mode: other }); toast.success(`已改为${other === 'lan' ? '内网' : '公网'}互联`); await get('/berth/conn?now=1'); reload() } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
+  }
+  const names = v3 && (
+    <p className="text-xs text-muted-foreground">
+      Berth：{data.peer_lan ? <>内网 <span className={cn('font-mono', data.mode === 'lan' && 'text-foreground')}>{data.peer_lan}</span></> : '没有内网名字'}
+      {' · '}{data.peer_public ? <>公网 <span className={cn('font-mono', data.mode === 'public' && 'text-foreground')}>{data.peer_public}</span></> : '没有公网名字'}
+      {canSwitch && <Button size="xs" variant="ghost" className="ml-1" disabled={busy} onClick={switchMode}>改为{other === 'lan' ? '内网' : '公网'}互联</Button>}
+    </p>
+  )
+  if (c.error) return (
+    <div className="grid gap-1.5">
+      <span className="flex items-start gap-1 text-sm text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" />{v3 ? `${modeLabel} · 连不上：` : ''}{c.error}</span>
+      {names}
+    </div>
+  )
   const tag = c.kind === 'lan' ? <Pill tone="green"><Home className="mr-0.5 inline size-3" />内网互联</Pill>
     : c.kind === 'tailscale' ? <Pill tone="green"><Waypoints className="mr-0.5 inline size-3" />Tailscale 互联（加密）</Pill>
     : <Pill tone={c.via === 'direct' ? 'blue' : 'amber'}><Globe className="mr-0.5 inline size-3" />公网互联 · {VIA[c.via] ?? c.via}</Pill>
@@ -198,13 +222,14 @@ export function BerthConn() {
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {tag}
         <span>延迟 {c.latency_ms} ms{c.jitter_ms > 0 && <span className="text-muted-foreground"> · 抖动 {c.jitter_ms} ms</span>}</span>
-        {c.kind !== 'lan' && <span className="font-mono text-xs text-muted-foreground">{c.ip}{c.country && ` · ${zhRegion?.of(c.country) ?? c.country}`}</span>}
+        {c.kind === 'public' && <span className="font-mono text-xs text-muted-foreground">{c.ip}{c.country && ` · ${zhRegion?.of(c.country) ?? c.country}`}</span>}
         <span className={cn('text-xs', data.key_auth ? 'text-success' : 'text-muted-foreground')}>{data.key_auth ? '· 签名不带令牌' : '· 旧版签名（Berth 升级后自动切换）'}</span>
       </div>
       {c.kind === 'public' && c.via !== 'direct' && (
         <p className="text-xs text-muted-foreground">加密在{VIA[c.via]?.replace('经 ', '') ?? '代理'}处解开，它能看到两边通信的内容。要端到端加密，请用 Tailscale 或直连端口；如果代理是你自己服务器上的反向代理，可以忽略。</p>
       )}
-      {data.urls.length > 1 && <p className="text-xs text-muted-foreground">Berth 的地址（连不上时按顺序自动换）：{data.urls.map((u) => <span key={u} className={cn('mr-2 font-mono', u === c.url && 'text-foreground')}>{u}{u === c.url && ' ✓'}</span>)}</p>}
+      {names}
+      {!v3 && data.urls.length > 1 && <p className="text-xs text-muted-foreground">Berth 的地址（连不上时按顺序自动换）：{data.urls.map((u) => <span key={u} className={cn('mr-2 font-mono', u === c.url && 'text-foreground')}>{u}{u === c.url && ' ✓'}</span>)}</p>}
     </div>
   )
 }

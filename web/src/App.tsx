@@ -35,6 +35,8 @@ import BerthPage from '@/pages/berth'
 import CloudflarePage from '@/pages/cloudflare'
 import RemotePage from '@/pages/remote'
 import { UndoWatcher } from '@/components/undo'
+import { PrimaryHostGuard } from '@/components/access-address'
+import { BerthChooser } from '@/components/berth-chooser'
 import Interfaces from '@/pages/interfaces'
 import DHCPPage from '@/pages/dhcp'
 import FirewallPage from '@/pages/firewall'
@@ -112,10 +114,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <PrimaryHostGuard />
         <ModeProvider>
           <Routed />
           <Welcome />
           <UndoWatcher />
+          <BerthChooser />
         </ModeProvider>
         <Toaster position="top-center" richColors />
       </AuthProvider>

@@ -129,10 +129,16 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if err := ca.Refresh(certNames()); err != nil {
+		names := func() []string { return append(certNames(), app.LANName()) } // the LAN name may be renamed
+		if err := ca.Refresh(names()); err != nil {
 			log.Fatal(err)
 		}
-		go ca.Watch(certNames, log.Printf)
+		panel.RefreshCert = func() {
+			if err := ca.Refresh(names()); err != nil {
+				log.Printf("certificate refresh: %v", err)
+			}
+		}
+		go ca.Watch(names, log.Printf)
 		app.CA = ca
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			if c := app.OriginCertificate(h); c != nil { // Cloudflare itself, for a proxied name

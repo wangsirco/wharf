@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import {
   Anchor, BellRing, Check, ChevronRight, Cloud, Earth, Home, LayoutGrid, Puzzle, Server, ShieldHalf, Sparkles, Users, Waypoints,
 } from 'lucide-react'
-import { post, put } from '@/lib/api'
+import { get, post, put } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { refreshBrand, useBrand } from '@/lib/brand'
 import { useMode } from '@/lib/mode'
@@ -13,6 +13,7 @@ import { Field } from '@/components/common'
 import { BrandMark } from '@/components/brand-mark'
 import { DepsPanel } from '@/components/deps'
 import { LoginModeStep } from '@/components/login-mode'
+import { LanNameStep, type AccessInfo } from '@/components/access-address'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -29,6 +30,8 @@ export function Welcome() {
   const [me, setMe] = useState('')
   const [panel, setPanel] = useState({ name: '', subtitle: '' })
   const [reach, setReach] = useState<Reach>('home')
+  const [lanOn, setLanOn] = useState(true)
+  const [lanKey, setLanKey] = useState(0)
 
   useEffect(() => { if (user && !onboarded) setOpen(true) }, [user, onboarded])
   useEffect(() => {
@@ -116,6 +119,21 @@ export function Welcome() {
       ),
       next: saveNames,
     },
+    ...(isSuper ? [{
+      title: '用名字打开面板',
+      body: <LanNameStep key={lanKey} on={lanOn} setOn={setLanOn} />,
+      // on: switch the router's 443 sharing on, then stay to check this device; off or done: move on
+      next: async () => {
+        if (!lanOn) { setStep((s) => s + 1); return }
+        try {
+          const a = await get<AccessInfo>('/panel/access')
+          if (a.lan443) { setStep((s) => s + 1); return }
+          await put('/panel/access', { lan443: true })
+          setLanKey((k) => k + 1)
+          toast.success('已开启，下面检查这台设备能不能打开')
+        } catch (e) { toast.error((e as Error).message) }
+      },
+    }] : []),
     { title: '以后怎么登录？', body: <LoginModeStep /> },
     ...(isSuper ? [{ title: '从哪里打开面板？', body: <ReachStep value={reach} onChange={setReach} /> }] : []),
     {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Search, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { post } from '@/lib/api'
@@ -44,9 +44,10 @@ function TopList({ items, label, tone }: { items?: Named[]; label: (x: Named) =>
 }
 
 export default function DNS() {
-  const [range, setRange] = useState('1d')
+  const [sp] = useSearchParams()
+  const [range, setRange] = useState(['1h', '1d', '7d', '30d'].includes(sp.get('range') ?? '') ? sp.get('range')! : '1d')
   const { data, reload } = useApi<Summary>(`/nextdns/summary?range=${range}`, 60000)
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(sp.get('q') ?? '')
   const [status, setStatus] = useState('blocked')
   const { data: logs, error: logErr } = useApi<{ data: NdLog[] }>(`/nextdns/logs?status=${status === 'all' ? '' : status}&search=${encodeURIComponent(q)}`, 30000)
   const { isSuper } = useAuth()

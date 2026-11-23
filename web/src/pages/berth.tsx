@@ -40,7 +40,9 @@ export default function BerthPage() {
           <img src="/berth/mark.svg" alt="" className="size-9" />
           <div className="min-w-0 flex-1">
             <div className="font-semibold">已和 Berth「{berth.name}」配对</div>
-            <div className="truncate font-mono text-xs text-muted-foreground">{berth.url}</div>
+            <div className="truncate font-mono text-xs text-muted-foreground">
+              {berth.lan || berth.public ? <>{berth.lan && <>内网 {berth.lan}</>}{berth.lan && berth.public && ' · '}{berth.public && <>公网 {berth.public}</>}</> : berth.url}
+            </div>
           </div>
           {berth.state === 'active'
             ? <Button onClick={open}><ExternalLink /> 打开 Berth</Button>

@@ -214,6 +214,12 @@ var migrations = []string{
 	// and whether it signs with a key id instead of sending its token (X-Berth-Key / X-Wharf-Key)
 	`ALTER TABLE berth_link ADD COLUMN urls TEXT NOT NULL DEFAULT '[]';
 	 ALTER TABLE berth_link ADD COLUMN key_auth INTEGER NOT NULL DEFAULT 0`,
+	// v24: Berth v3 — how the two are linked (lan | public; '' = v2 address list), Berth's own
+	// names and the protocol it speaks
+	`ALTER TABLE berth_link ADD COLUMN mode TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE berth_link ADD COLUMN peer_lan TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE berth_link ADD COLUMN peer_public TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE berth_link ADD COLUMN peer_protocol INTEGER NOT NULL DEFAULT 0`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

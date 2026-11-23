@@ -370,3 +370,57 @@ DELETE /api/ext/berth/v1/dns/names/{name}                → {"ok": true}
 
 - `berth_link.urls`：Berth 的全部地址（JSON 数组）；`berth_link.url` 是上次成功的那个。
 - `berth_link.key_auth`：Berth 是否已改用 `X-Berth-Key`。
+
+## 9. 协议 v3（Wharf 0.25.0 起）
+
+`GET /ping` 回答 `"protocol": 3`。双方都 ≥ 3 时才使用本节；否则一切按 v2。
+
+### 9.1 名字
+
+```
+GET /api/ext/berth/v1/names        （签名，不需要额外权限；Berth 提供同样的 /api/ext/wharf/v1/names）
+→ {"lan": "https://wharf.lan", "public": "https://wharf.example.com", "lan_fp": "<本地 CA 指纹>"}
+```
+
+- `lan`：`https://<panel.lan_host>.<dnsmasq 域名>`。开启「不带端口」（`panel.lan443`）后没有端口，否则带面板端口。
+- `public`：按顺序取第一个：经 443 或橙色云的公网名字 → 隧道名字 → 开了面板端口的公网名字（带端口）。没有就是空串。
+- Wharf 读 Berth 的 `/names`：配对完成后、收到 `link.updated` / `names.changed` 事件后，以及测互联状态时（最多 5 分钟一次）。Wharf 自己的名字变了，会给 Berth 发 `link.updated`（带 `names`）。
+
+### 9.2 互联方式
+
+- `/pair/berth?...&mode=lan|public`、`pair/request {…, "mode"}`；内网发现一律是 `lan`。授权页第一步让管理员选，默认按 `mode`（没给时按 `berth_url` 是不是内网地址）。
+- `pair/exchange` 返回多带 `"mode"`、`"names": {"lan", "public", "lan_fp"}`；`wharf_url` 是所选方式下 Wharf 的名字。
+- 选定后只用对方那一种名字（`berth_link.mode` + `peer_lan` / `peer_public`），**连不上不换另一种**；错误按步骤说明（解析不到 / 连不上 / 证书不对 / 超时）。
+- 切换：`POST /events {"type": "link.mode", "mode": "lan|public"}`，两个方向都一样，令牌不变。Wharf 一侧切换前会确认双方都有对应的名字。
+
+### 9.3 免登录带上名字
+
+- Berth → Wharf：`POST /sso/ticket {"berth_user", "return_to", "via": "lan|public"}` → `{"url", "via"}`，`url` 以 Wharf 对应的名字开头；没有那个名字时用另一个，`via` 说明实际用的是哪个。
+- Wharf → Berth：`POST /sso/ticket {"wharf_user", "return_to", "ref", "via"}`。Wharf 接受以 Berth 任一已知名字或地址开头的 `url`。
+- 浏览器一侧怎么选 `via`：页面是用内网名字或内网 IP 打开的 → `lan`；用公网名字打开的 → 后台试连 Berth 的内网名字 1.5 秒，不通用 `public`，通了就弹出选择菜单（推荐内网）；对方只有一种名字且和当前入口不一致时也弹菜单；菜单可以「记住这台设备的选择」。
+
+### 9.4 统计（scope `stats`，只读）
+
+| 接口 | 内容（和 Wharf 页面用的 JSON 相同） |
+|---|---|
+| `GET /stats/summary` | 见下 |
+| `GET /stats/traffic?from=&to=`（或 `range=1h\|today\|24h\|7d\|30d\|90d`） | `/api/traffic/overview` |
+| `GET /stats/geo?range=1h\|24h\|7d` | `/api/geo/flows` |
+| `GET /stats/visitors?range=1h\|24h\|7d\|30d&cc=&q=&match=&limit=&before_id=` | `/api/visitors`（`{items, geo_ready}`） |
+| `GET /stats/devices` | `/api/devices` |
+| `GET /stats/devices/{mac}/traffic?from=&to=` | `/api/devices/{mac}/traffic` |
+| `GET /stats/devices/{mac}/presence` | `/api/devices/{mac}/presence` |
+| `GET /stats/dns?range=1h\|1d\|7d\|30d` | `/api/nextdns/summary`；没连接 NextDNS 时 404 |
+| `GET /stats/forwards/{id}?range=` | `/api/forwards/{id}/stats`；不是 Berth 建的映射 404 |
+
+`/stats/summary`：`devices {online,total}`、`today {up,down}`（今天 0 点起）、`visitors_24h {count,countries}`、`blocked_24h {attacks（被拒绝的面板访问）, dns（NextDNS 拦截次数）}`、`series_24h [{t,up,down}]`（按小时）、`top_devices`（今天前 5）、`top_countries`（24 小时访客前 5）、`pages`、`filters`（各页面支持的筛选参数）。服务端缓存 25 秒。
+
+页面支持的筛选参数（`return_to` 用）：`/traffic?range=`、`/visitors?cc=&q=&match=&range=`、`/world?range=`、`/devices?q=`、`/devices/{mac}`、`/dns?range=&q=`。
+
+### 9.5 不带端口：路由器的 443
+
+LuCI（uhttpd）照旧监听 443。开启「不带端口」后，Wharf 加一条防火墙转发 `owp_lan443`：从 LAN 访问路由器 LAN 地址 443 的 TCP 连接转到 agent 的分流器（20445）。分流器只读 ClientHello、不解开 TLS：Wharf 的名字（内网名字、公网名字）交给面板（127.0.0.1:20090，带 PROXY 协议头），其余（用 IP 打开、其他名字、明文 HTTP）原样交给 127.0.0.1:443 的 uhttpd。关闭后删掉这条转发，443 回到 uhttpd 独占。在家里，公网名字也解析到 LAN 地址、经同一个分流器到面板。用 IP:端口 或旧名字打开面板时，浏览器先在后台试连内网名字，能打开（解析得到、证书已信任）才跳过去，否则在页面顶部提示怎么修。
+
+### 9.6 数据（迁移 v24）
+
+`berth_link.mode`（`''` = v2 地址列表）、`peer_lan`、`peer_public`、`peer_protocol`。设置：`panel.lan_host`、`panel.lan443`。路由器：uci `owp.lan443`（`enabled`、`list name`），防火墙 `owp_lan443`。

@@ -120,14 +120,16 @@ func (a *App) measureBerth(l *berthLink) *berthConn {
 	}
 	var hdr http.Header
 	var err error
+	var errs []string
 	for _, base := range l.candidates() {
 		if _, hdr, err = ping(base); err == nil {
 			out.URL = base
 			break
 		}
+		errs = append(errs, stepErr(base, err))
 	}
 	if out.URL == "" {
-		out.Error = "连不上 Berth：" + shortErr(err)
+		out.Error = strings.Join(errs, "；")
 		return out
 	}
 	var samples []float64
@@ -175,12 +177,15 @@ func (a *App) handleBerthConn(w http.ResponseWriter, r *http.Request) {
 	fresh := v != nil && berthConnCache.linkID == l.ID && time.Since(time.Unix(v.At, 0)) < 25*time.Second
 	berthConnCache.Unlock()
 	if !fresh || r.URL.Query().Get("now") == "1" {
-		v = a.measureBerth(l)
+		a.refreshPeer(l, false)
+		v = a.measureBerth(a.berth())
 		berthConnCache.Lock()
 		berthConnCache.linkID, berthConnCache.v = l.ID, v
 		berthConnCache.Unlock()
 	}
-	writeJSON(w, 200, map[string]any{"conn": v, "urls": l.candidates(), "key_auth": l.KeyAuth})
+	l = a.berth() // the measurement may have learnt Berth's names
+	writeJSON(w, 200, map[string]any{"conn": v, "urls": l.candidates(), "key_auth": l.KeyAuth, "mode": l.Mode, "peer_lan": l.PeerLAN, "peer_public": l.PeerPub,
+		"peer_protocol": l.PeerProto, "wharf": a.wharfNames()})
 }
 
 // ---- LAN discovery: Berth asks, the super admin allows ----
@@ -274,6 +279,7 @@ func (a *App) handleBerthPairRequest(w http.ResponseWriter, r *http.Request) {
 		BerthURLs []string `json:"berth_urls"`
 		BerthFP   string   `json:"berth_fp"`
 		WharfFP   string   `json:"wharf_fp"`
+		Mode      string   `json:"mode"` // v3; discovery means the same LAN
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
@@ -465,7 +471,7 @@ func (a *App) handleBerthAskAllow(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "申请已过期或已处理")
 		return
 	}
-	q.wharfCode = berthPend(&berthPending{BerthURL: q.URLs[0], URLs: q.URLs, BerthFP: q.BerthFP, Scopes: scopes, Targets: targets, Expires: exp,
+	q.wharfCode = berthPend(&berthPending{BerthURL: q.URLs[0], URLs: q.URLs, Mode: "lan", BerthFP: q.BerthFP, Scopes: scopes, Targets: targets, Expires: exp,
 		WharfURL: q.wharfURL, By: u, IP: a.clientIP(r)})
 	q.State = "allowed"
 	berthDisc.until = time.Time{} // one Berth: the window closes

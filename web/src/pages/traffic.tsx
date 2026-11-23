@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowDown, ArrowUp, Database, MonitorSmartphone } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
 import type { Agg } from '@/lib/types'
@@ -19,7 +19,8 @@ interface Overview {
 }
 
 export default function Traffic() {
-  const [range, setRange] = useState<Range>(presetRange('today'))
+  const [sp] = useSearchParams()
+  const [range, setRange] = useState<Range>(presetRange((['1h', 'today', '7d', '30d', '90d'].includes(sp.get('range') ?? '') ? sp.get('range') : 'today') as Parameters<typeof presetRange>[0]))
   const { data, error } = useApi<Overview>(`/traffic/overview?from=${range.from}&to=${range.to}`, 60000)
   const navigate = useNavigate()
   const total = (data?.up ?? 0) + (data?.down ?? 0)

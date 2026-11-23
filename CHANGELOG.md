@@ -1,5 +1,12 @@
 # Changelog · 更新日志
 
+## 0.25.0 — One name at home, Berth v3 · 内网名字不带端口、Berth 互联 v3
+
+- https://wharf.lan without a port: the router's LAN 443 is shared — Wharf's names go to the panel, everything else (LuCI by IP) stays with LuCI (agent splitter, firewall redirect owp_lan443); the LAN name can be renamed; opened by IP or an old name, the panel moves to the LAN name when the device can open it · 内网名字不带端口、可改名、自动转到主名字
+- Settings → Access addresses (LAN / public / fallback, certificate steps per system) and a wizard step, on by default · 「访问地址」卡片和向导一步
+- Berth v3 (docs/BERTH.md §9): names endpoint, LAN or public link chosen at pairing and switchable without pairing again (no silent switching, errors by step), single sign-on to the right name with a chooser when unsure, read-only statistics for Berth's overview (scope stats), visitor log filters by country and period · Berth v3：名字、内网 / 公网互联、打开时判断在家在外、统计给 Berth
+- Pages take filters from the address (/visitors?cc=, /world?range=, /dns?range=, /traffic?range=, /devices?q=) · 页面支持地址里的筛选参数
+
 ## 0.24.0 — Berth pairing v2, verdict line, settings tabs, phones · Berth 互联 v2、一句话结论、设置分类、手机
 
 - Berth pairing v2 (docs/BERTH.md §8): LAN discovery — Berth asks, the admin allows here after comparing a six-digit code (LAN sources only, a 10-minute window, identity confirmed again); the pairing page explains the LAN address with Wharf's fingerprint and public names with their public certificate; several Berth addresses, LAN first, switched automatically when one fails; signed requests carry a token id instead of the token once Berth supports it; link status with LAN / Tailscale / public (direct, Cloudflare, CloudFront, Fastly, proxy), latency, jitter, peer address and country; new scope to register `.lan` names for Berth in the router's DNS · Berth 互联 v2：内网发现绑定、两种证书说明、多地址自动切换、签名不带令牌、互联状态、登记 .lan 名字

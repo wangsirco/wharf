@@ -56,7 +56,7 @@ import (
 const berthTokenPrefix = "wharf_bth_"
 
 // berthProtocol: 2 = key-id signing, several Berth addresses, LAN discovery, .lan names.
-const berthProtocol = 2
+const berthProtocol = 3 // 3 = one name per side (lan / public), names, sso via, stats
 
 type berthScope struct {
 	Key   string `json:"key"`
@@ -73,6 +73,7 @@ var berthScopes = []berthScope{
 	{"bans", "封禁同步", "下发或撤回同步过来的封禁；读取 Wharf 里标为可同步的封禁"},
 	{"alerts", "告警转交", "向 Wharf 投递告警，或接收 Wharf 转交的告警"},
 	{"sso", "免登录跳转", "为已设置对应关系的 Berth 用户申请一次性登录票据"},
+	{"stats", "查看统计", "只读：设备数、今日流量、访问记录与地图、设备流量、NextDNS 汇总、Berth 建的映射的用量，在 Berth 的总览里显示"},
 	{"dns", "本地域名", "在路由器 DNS 里登记 Berth 的名字（如 mini.lan，只能指向 Berth 主机，最多 5 个），方便用 Passkey"},
 }
 
@@ -101,6 +102,10 @@ type berthLink struct {
 	LastError string        `json:"last_error"`
 	URLs      []string      `json:"urls"`     // every address Berth gave, LAN first; URL is the one that last worked
 	KeyAuth   bool          `json:"key_auth"` // sign with a key id, never send the token (both sides ≥ v2)
+	Mode      string        `json:"mode"`     // v3: lan | public — which pair of names; "" = the v2 address list
+	PeerLAN   string        `json:"peer_lan"` // v3: Berth's own names (GET /names)
+	PeerPub   string        `json:"peer_public"`
+	PeerProto int           `json:"peer_protocol"`
 
 	tokenHash string
 	signKey   []byte
@@ -174,13 +179,13 @@ func (a *App) berthOpen(enc string) ([]byte, error) {
 
 // ---- storage ----
 
-const berthCols = `id, name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, COALESCE(expires_at,0), created_at, COALESCE(last_seen_at,0), wharf_url, status, last_error, urls, key_auth`
+const berthCols = `id, name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, COALESCE(expires_at,0), created_at, COALESCE(last_seen_at,0), wharf_url, status, last_error, urls, key_auth, mode, peer_lan, peer_public, peer_protocol`
 
 func (a *App) scanBerth(row interface{ Scan(...any) error }) (*berthLink, error) {
 	var l berthLink
 	var outEnc, keyEnc, scopes, targets, urls string
 	if err := row.Scan(&l.ID, &l.Name, &l.URL, &l.CertFP, &l.tokenHash, &outEnc, &keyEnc, &scopes, &targets, &l.ExpiresAt, &l.CreatedAt, &l.LastSeen,
-		&l.WharfURL, &l.Status, &l.LastError, &urls, &l.KeyAuth); err != nil {
+		&l.WharfURL, &l.Status, &l.LastError, &urls, &l.KeyAuth, &l.Mode, &l.PeerLAN, &l.PeerPub, &l.PeerProto); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(urls), &l.URLs)
@@ -364,6 +369,9 @@ func keyID(token string) string { return tokenHash(token)[:16] }
 
 // candidates: the address that worked last, then the others in Berth's order (LAN first).
 func (l *berthLink) candidates() []string {
+	if u := l.modeURL(); u != "" { // v3: only the chosen pair of names, no switching to the other kind
+		return []string{u}
+	}
 	out := []string{l.URL}
 	for _, u := range l.URLs {
 		if u != "" && !slices.Contains(out, u) {
@@ -623,6 +631,7 @@ func (br *berthReq) summary(s string) string {
 type berthPending struct {
 	BerthURL string
 	URLs     []string // every address, LAN first (berth_urls)
+	Mode     string   // v3: lan | public
 	BerthFP  string
 	Scopes   []string
 	Targets  []berthTarget
@@ -783,7 +792,12 @@ func (a *App) handleBerthPairPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	cands, ips := a.berthCandidates(r.Context(), urls)
 	existing := a.berth()
+	mode := q.Get("mode")
+	if mode != "lan" && mode != "public" {
+		mode = map[bool]string{true: "lan", false: "public"}[berthURLRank(bu) < 2]
+	}
 	writeJSON(w, 200, map[string]any{"berth_url": bu, "berth_urls": urls, "berth_fp": fp, "scopes": berthScopes, "devices": cands, "resolved": ips,
+		"mode": mode, "names": a.wharfNames(),
 		"paired": existing != nil, "paired_name": func() string {
 			if existing != nil {
 				return existing.Name
@@ -861,6 +875,7 @@ func (a *App) handleBerthPairApprove(w http.ResponseWriter, r *http.Request) {
 		BerthFP   string   `json:"berth_fp"`
 		Code      string   `json:"code"`
 		CB        string   `json:"cb"`
+		Mode      string   `json:"mode"`
 		berthGrant
 	}
 	if readJSON(r, &req) != nil {
@@ -899,8 +914,21 @@ func (a *App) handleBerthPairApprove(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, err.Error())
 		return
 	}
+	if req.Mode != "" && req.Mode != "lan" && req.Mode != "public" {
+		jsonErr(w, 400, "互联方式只能是 lan 或 public")
+		return
+	}
+	if req.Mode == "public" && a.publicURL() == "" {
+		jsonErr(w, 400, "公网互联需要 Wharf 有公网名字：先在「外网访问」里设置，或选内网互联")
+		return
+	}
 	wharfURL := "https://" + r.Host
-	code := berthPend(&berthPending{BerthURL: urls[0], URLs: urls, BerthFP: fp, Scopes: scopes, Targets: targets, Expires: exp, WharfURL: wharfURL,
+	if n := a.wharfNames(); req.Mode == "lan" && n.LAN != "" {
+		wharfURL = n.LAN
+	} else if req.Mode == "public" {
+		wharfURL = n.Public
+	}
+	code := berthPend(&berthPending{BerthURL: urls[0], URLs: urls, Mode: req.Mode, BerthFP: fp, Scopes: scopes, Targets: targets, Expires: exp, WharfURL: wharfURL,
 		By: currentUser(r), IP: a.clientIP(r)})
 
 	cb, _ := url.Parse(req.CB)
@@ -994,8 +1022,8 @@ func (a *App) handleBerthExchange(w http.ResponseWriter, r *http.Request) {
 	if len(urls) == 0 {
 		urls = []string{p.BerthURL}
 	}
-	res, err := a.db.Exec(`INSERT INTO berth_link(name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, expires_at, created_at, last_seen_at, wharf_url, urls)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, name, p.BerthURL, p.BerthFP, tokenHash(token), outEnc, keyEnc, mustJSON(p.Scopes), mustJSON(p.Targets), exp, now, now, p.WharfURL, mustJSON(urls))
+	res, err := a.db.Exec(`INSERT INTO berth_link(name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, expires_at, created_at, last_seen_at, wharf_url, urls, mode)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, name, p.BerthURL, p.BerthFP, tokenHash(token), outEnc, keyEnc, mustJSON(p.Scopes), mustJSON(p.Targets), exp, now, now, p.WharfURL, mustJSON(urls), p.Mode)
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return
@@ -1007,11 +1035,11 @@ func (a *App) handleBerthExchange(w http.ResponseWriter, r *http.Request) {
 	go func() { // check the way back while Berth is still finishing its side
 		time.Sleep(2 * time.Second)
 		if l := a.berth(); l != nil {
-			_ = a.berthCall(l, "GET", "/ping", nil, nil)
+			a.refreshPeer(l, true) // ping, and Berth's names when it speaks v3
 		}
 	}()
 	writeJSON(w, 200, map[string]any{"token": token, "scopes": p.Scopes, "targets": p.Targets, "expires_at": p.Expires,
-		"wharf_name": a.setting("ui.name"), "wharf_url": p.WharfURL})
+		"wharf_name": a.setting("ui.name"), "wharf_url": p.WharfURL, "mode": p.Mode, "names": a.wharfNames()})
 }
 
 func scopeLabels(ss []string) string {
@@ -1087,7 +1115,7 @@ func (a *App) handleBerthStatus(w http.ResponseWriter, r *http.Request) {
 		ips = append(ips, ip)
 	}
 	slices.Sort(ips)
-	writeJSON(w, 200, map[string]any{"paired": true, "name": l.Name, "url": l.URL, "state": l.state(), "hosts": ips})
+	writeJSON(w, 200, map[string]any{"paired": true, "name": l.Name, "url": l.URL, "state": l.state(), "hosts": ips, "lan": l.PeerLAN, "public": l.PeerPub, "mode": l.Mode})
 }
 
 // PUT /api/berth {scopes, targets} — scopes may only shrink; targets may change.
@@ -1131,7 +1159,7 @@ func (a *App) handleBerthUpdate(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(scopes, "sni") && slices.Contains(l.Scopes, "sni") {
 		a.clearBerthSNI()
 	}
-	a.berthNotify("link.updated", map[string]any{"scopes": scopes, "targets": targets})
+	a.berthNotify("link.updated", map[string]any{"scopes": scopes, "targets": targets, "names": a.wharfNames()})
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1345,6 +1373,7 @@ func (a *App) handleBerthSSOTicket(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BerthUser string `json:"berth_user"`
 		ReturnTo  string `json:"return_to"`
+		Via       string `json:"via"` // v3: lan | public — the name the browser can reach
 	}
 	if json.Unmarshal(br.body, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
@@ -1361,7 +1390,10 @@ func (a *App) handleBerthSSOTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := sign.RandomHex(24)
-	aud := br.link.WharfURL
+	aud, via := br.link.WharfURL, ""
+	if req.Via != "" {
+		aud, via = a.ssoBase(req.Via)
+	}
 	berthTickets.Lock()
 	for k, v := range berthTickets.m {
 		if time.Now().After(v.until) {
@@ -1370,7 +1402,11 @@ func (a *App) handleBerthSSOTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	berthTickets.m[t] = &ssoTicket{userID: u.ID, berthUser: req.BerthUser, returnTo: safeReturn(req.ReturnTo), audience: aud, until: time.Now().Add(60 * time.Second)}
 	berthTickets.Unlock()
-	writeJSON(w, 200, map[string]string{"url": aud + "/sso/berth?t=" + t})
+	out := map[string]string{"url": aud + "/sso/berth?t=" + t}
+	if via != "" {
+		out["via"] = via
+	}
+	writeJSON(w, 200, out)
 }
 
 // GET /sso/berth?t= — the browser arrives from Berth with a one-time ticket.
@@ -1436,17 +1472,24 @@ func (a *App) handleBerthSSOOut(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ReturnTo string `json:"return_to"`
 		Ref      string `json:"ref"`
+		Via      string `json:"via"` // lan | public: which of Berth's names this browser should use
 	}
 	_ = readJSON(r, &req)
 	u := currentUser(r)
 	var out struct {
 		URL string `json:"url"`
+		Via string `json:"via,omitempty"`
 	}
-	if err := a.berthCall(l, "POST", "/sso/ticket", map[string]string{"wharf_user": u.Username, "return_to": safeReturn(firstNonEmpty(req.ReturnTo, "/")), "ref": clean(req.Ref, 200)}, &out); err != nil {
+	body := map[string]string{"wharf_user": u.Username, "return_to": safeReturn(firstNonEmpty(req.ReturnTo, "/")), "ref": clean(req.Ref, 200)}
+	if req.Via == "lan" || req.Via == "public" {
+		body["via"] = req.Via
+	}
+	if err := a.berthCall(l, "POST", "/sso/ticket", body, &out); err != nil {
 		jsonErr(w, 502, err.Error())
 		return
 	}
-	if !slices.ContainsFunc(l.candidates(), func(b string) bool { return strings.HasPrefix(out.URL, strings.TrimRight(b, "/")+"/") }) {
+	bases := append(append(l.candidates(), l.URLs...), l.PeerLAN, l.PeerPub)
+	if !slices.ContainsFunc(bases, func(b string) bool { return b != "" && strings.HasPrefix(out.URL, strings.TrimRight(b, "/")+"/") }) {
 		jsonErr(w, 502, "Berth 返回的跳转地址不在它自己的地址上")
 		return
 	}
@@ -1508,6 +1551,17 @@ func (a *App) handleBerthEvent(w http.ResponseWriter, r *http.Request) {
 		if hostnameOK(d) && (o == "wharf" || o == "berth") {
 			_, _ = a.db.Exec(`INSERT INTO ddns_owner(domain, owner) VALUES(?,?) ON CONFLICT(domain) DO UPDATE SET owner=excluded.owner`, strings.ToLower(d), o)
 		}
+	case "link.mode": // v3: Berth switched between the LAN and the public pair of names
+		if m, _ := ev["mode"].(string); m == "lan" || m == "public" {
+			_, _ = a.db.Exec(`UPDATE berth_link SET mode=?, last_error='' WHERE id=?`, m, br.link.ID)
+			a.audit(a.berthActor(r), "berth.mode", "berth", strconv.FormatInt(br.link.ID, 10), br.summary("Berth 改为"+map[string]string{"lan": "内网互联", "public": "公网互联"}[m]), br.link.Mode, m, false)
+			berthConnCache.Lock()
+			berthConnCache.v = nil
+			berthConnCache.Unlock()
+		}
+	case "link.updated", "names.changed": // Berth's names may have changed
+		l := br.link
+		go a.refreshPeer(l, true)
 	case "link.renamed":
 		if n := clean(fmt.Sprint(ev["name"]), 32); n != "" && n != "<nil>" {
 			_, _ = a.db.Exec(`UPDATE berth_link SET name=? WHERE id=?`, n, br.link.ID)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Ban, Search, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react'
 import { get } from '@/lib/api'
 import type { IPSB, Visitor } from '@/lib/types'
@@ -25,14 +26,18 @@ export default function Visitors() {
   const [items, setItems] = useState<Visitor[]>([])
   const [geoReady, setGeoReady] = useState(true)
   const [more, setMore] = useState(false)
-  const [q, setQ] = useState('')
-  const [match, setMatch] = useState('all')
+  const [sp] = useSearchParams()
+  const [q, setQ] = useState(sp.get('q') ?? '')
+  const [match, setMatch] = useState(sp.get('match') ?? 'all')
+  const cc = sp.get('cc') ?? '', vrange = sp.get('range') ?? ''
   const [sel, setSel] = useState<Visitor | null>(null)
 
   const query = (beforeId?: number) => {
     const p = new URLSearchParams({ limit: String(PAGE) })
     if (q.trim()) p.set('q', q.trim())
     if (match !== 'all') p.set('match', match)
+    if (cc) p.set('cc', cc)
+    if (vrange) p.set('range', vrange)
     if (beforeId) p.set('before_id', String(beforeId))
     return get<{ items: Visitor[]; geo_ready: boolean }>('/visitors?' + p)
   }

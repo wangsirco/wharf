@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AccessAddressCard } from '@/components/access-address'
 
 type Settings = Record<string, string>
 interface AgentStatus { ok: boolean; url: string; error?: string; version?: string; hostname?: string; firewall?: string; time?: number }
@@ -147,6 +148,7 @@ export default function SettingsPage() {
         </Section>
         </>}
         {tab === 'link' && <>
+        <AccessAddressCard />
         <Section title="外网访问" desc="面板的公网域名、Cloudflare 隧道、谁能从外面打开，都在「外网访问」一页里。">
           <div className="flex flex-wrap gap-2 p-4">
             <Button variant="outline" size="sm" render={<Link to="/remote" />}>打开「外网访问」</Button>

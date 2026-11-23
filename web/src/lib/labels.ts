@@ -27,7 +27,7 @@ export const actionLabels: Record<string, string> = {
   'ban.add': '封禁', 'ban.delete': '解除封禁',
   'berth.pair': '与 Berth 配对', 'berth.unpair': '解除 Berth 配对', 'berth.update': '修改 Berth 权限', 'berth.rotate': '轮换 Berth 令牌',
   'berth.user_map': 'Berth 用户对应', 'berth.ddns': 'DDNS 分工', 'berth.sni': 'Berth 443 分流',
-  'berth.discover': '允许 Berth 申请绑定', 'berth.allow': '允许 Berth 绑定', 'berth.refuse': '拒绝 Berth 绑定',
+  'berth.discover': '允许 Berth 申请绑定', 'berth.mode': 'Berth 互联方式', 'berth.allow': '允许 Berth 绑定', 'berth.refuse': '拒绝 Berth 绑定',
   'cloudflare.token': 'Cloudflare 令牌', 'cloudflare.attack': '受攻击模式', 'cloudflare.purge': '清除 Cloudflare 缓存',
   'cloudflare.access': 'Access 登录保护', 'cloudflare.access.delete': '删除 Access 保护',
   'tunnel.route.add': '隧道添加名字', 'tunnel.route.delete': '隧道删除名字', 'tunnel.delete': '删除隧道',

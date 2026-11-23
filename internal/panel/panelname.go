@@ -93,7 +93,7 @@ func (a *App) lanInfo() (domain, ip string) {
 
 func (a *App) localPanelName() string {
 	d, _ := a.lanInfo()
-	return LocalPanelName(d)
+	return a.lanHost() + "." + d
 }
 
 // publicNames: the owner's names for the panel (setting panel.public_names, a JSON list;
@@ -134,6 +134,9 @@ func (a *App) panelFrontRoute() *panelRoute {
 // LAN address, where the panel is reached at https://name:port.
 func (a *App) homeAddrFor() string {
 	_, lan := a.lanInfo()
+	if a.lan443() { // the router's own 443 takes them at home (agent/lan443.go)
+		return lan
+	}
 	if ext, err := a.proxyExt(); err == nil && ext.Installed && ext.Running["front"] {
 		for _, w := range a.wans() {
 			if w.Up && w.IPv4 != "" {

@@ -92,6 +92,9 @@ func (a *App) handleOverviewTodo(w http.ResponseWriter, r *http.Request) {
 				add("warn", "/remote#panel-names", "面板的公网证书 %d 天后到期，自动续期好像没成功", int(d.Hours()/24))
 			}
 		}
+		if !a.lan443() && a.CA != nil {
+			add("info", "/settings?tab=link#"+tocAnchor("访问地址"), "还没开启「用 %s 打开，不带端口」：Passkey 只认名字，开启后更好记", "https://"+a.localPanelName())
+		}
 		if l := a.berth(); l != nil && l.state() != "active" {
 			add("warn", "/berth", "和 Berth「%s」的对接已失效，需要重新配对", l.Name)
 		}

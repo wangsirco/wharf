@@ -17,7 +17,7 @@ interface Scope { key: string; label: string; desc: string }
 interface Target { ip: string; mac?: string; name?: string }
 interface Link {
   id: number; name: string; url: string; cert_fp: string; wharf_url: string; scopes: string[]; targets: Target[]
-  expires_at: number; created_at: number; last_seen_at: number; status: 'active' | 'expired' | 'invalid'; last_error: string
+  expires_at: number; created_at: number; last_seen_at: number; status: 'active' | 'expired' | 'invalid'; last_error: string; mode: string; peer_lan: string; peer_public: string
 }
 interface UserMap { berth_user: string; wharf_user_id: number; wharf_username: string; wharf_name: string; super: boolean }
 interface BerthInfo { scopes: Scope[]; link: Link | null; users: UserMap[]; self_fp: string; bans?: number; forwards?: number; sni?: { domains: string[] } | null }
@@ -83,7 +83,7 @@ export function BerthCard() {
         )}
         {!dead && <div className="rounded-lg bg-muted/30 px-3 py-2"><div className="mb-1 text-xs text-muted-foreground">互联状态</div><BerthConn /></div>}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Info k="Berth"><a className="text-primary hover:underline" href={l.url} target="_blank" rel="noreferrer">{l.name} · {l.url}</a></Info>
+          <Info k="Berth">{l.peer_lan || l.peer_public ? <>{l.name} · {(l.mode === 'public' ? l.peer_public : l.peer_lan) || l.peer_lan || l.peer_public}</> : <>{l.name} · {l.url}</>}</Info>
           <Info k="状态"><Dot tone={dead ? 'bad' : l.last_error ? 'warn' : 'ok'} /> {dead ? '对接已失效' : '正常'}{l.last_error && <span className="block text-xs text-muted-foreground">{l.last_error}</span>}</Info>
           <Info k="Berth 本地证书指纹"><span className="break-all font-mono text-xs">{fpText(l.cert_fp)}</span><span className="block text-xs text-muted-foreground">直连时核对它；经公网域名时按域名校验</span></Info>
           <Info k="配对时间">{datetime(l.created_at)}{l.expires_at ? ` · ${datetime(l.expires_at)} 到期` : ' · 永久'}</Info>

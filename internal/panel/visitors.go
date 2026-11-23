@@ -151,6 +151,14 @@ func (a *App) handleVisitors(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, "tz_match=?")
 		args = append(args, v)
 	}
+	if v := strings.ToUpper(q.Get("cc")); len(v) == 2 {
+		conds = append(conds, "country=?")
+		args = append(args, v)
+	}
+	if secs := map[string]int64{"1h": 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}[q.Get("range")]; secs > 0 {
+		conds = append(conds, "ts >= ?")
+		args = append(args, time.Now().Unix()-secs)
+	}
 	if v := q.Get("before_id"); v != "" {
 		conds = append(conds, "id < ?")
 		args = append(args, v)

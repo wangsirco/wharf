@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 interface Scope { key: string; label: string; desc: string }
 interface Cand { ip: string; mac?: string; name?: string; online: boolean; matched: boolean }
-interface Preview { berth_url: string; berth_urls: string[]; berth_fp: string; scopes: Scope[]; devices: Cand[]; resolved: string[]; paired: boolean; paired_name: string }
+interface Preview { berth_url: string; berth_urls: string[]; berth_fp: string; mode: 'lan' | 'public'; names: { lan: string; public: string }; scopes: Scope[]; devices: Cand[]; resolved: string[]; paired: boolean; paired_name: string }
 
 // /pair/berth?berth_url=&berth_fp=&code=&cb= — Berth sends the super admin here to agree.
 export default function PairBerth() {
@@ -23,11 +23,12 @@ export default function PairBerth() {
   const [days, setDays] = useState(0)
   const [hosts, setHosts] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const qs = new URLSearchParams({ berth_url: q.get('berth_url') ?? '', berth_urls: q.get('berth_urls') ?? '', berth_fp: q.get('berth_fp') ?? '', cb: q.get('cb') ?? '' })
+  const [mode, setMode] = useState<'lan' | 'public'>('lan')
+  const qs = new URLSearchParams({ berth_url: q.get('berth_url') ?? '', berth_urls: q.get('berth_urls') ?? '', berth_fp: q.get('berth_fp') ?? '', cb: q.get('cb') ?? '', mode: q.get('mode') ?? '' })
 
   useEffect(() => {
     get<Preview>('/berth/pair/preview?' + qs.toString())
-      .then((r) => { setP(r); setScopes(r.scopes.map((s) => s.key)); setHosts(r.devices.filter((d) => d.matched).map((d) => d.ip)) })
+      .then((r) => { setP(r); setMode(r.mode === 'public' && r.names.public ? 'public' : 'lan'); setScopes(r.scopes.map((s) => s.key)); setHosts(r.devices.filter((d) => d.matched).map((d) => d.ip)) })
       .catch((e) => setErr((e as Error).message))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -37,7 +38,7 @@ export default function PairBerth() {
     try {
       const targets = p.devices.filter((d) => hosts.includes(d.ip)).map(({ ip, mac, name }) => ({ ip, mac, name }))
       const r = await post<{ redirect: string }>('/berth/pair/approve', {
-        berth_url: p.berth_url, berth_urls: p.berth_urls, berth_fp: p.berth_fp, code: q.get('code') ?? '', cb: q.get('cb') ?? '', scopes, expires_days: days, targets,
+        berth_url: p.berth_url, berth_urls: p.berth_urls, berth_fp: p.berth_fp, mode, code: q.get('code') ?? '', cb: q.get('cb') ?? '', scopes, expires_days: days, targets,
       })
       window.location.href = r.redirect
     } catch (e) { toast.error((e as Error).message); setBusy(false) }
@@ -51,6 +52,18 @@ export default function PairBerth() {
       {p && p.paired && <ErrorBox>Wharf 已经和 Berth「{p.paired_name}」配对。要换一个 Berth，请先在「Berth 服务器面板」页解除配对。</ErrorBox>}
       {p && !p.paired && (
         <>
+          <Section title="Berth 和路由器在同一个局域网吗？" desc="决定两边用哪对名字互相访问。以后可以在「Berth 服务器面板」页切换，不用重新配对。">
+            <div className="grid gap-2 p-4 sm:grid-cols-2">
+              {([['lan', '是，内网互联', '两边都用内网名字，例如 ' + (p.names.lan || 'https://wharf.lan') + ' ⇄ https://mini.lan。最快，不经过外网。', !!p.names.lan],
+                ['public', '不是，公网互联', p.names.public ? '两边都用公网名字（Wharf：' + p.names.public + '），按公网证书校验。' : 'Wharf 还没有公网名字：先在「外网访问」里设置一个。', !!p.names.public]] as const).map(([k, t, d, ok]) => (
+                <button key={k} type="button" disabled={!ok} onClick={() => setMode(k)}
+                  className={cn('grid gap-1 rounded-xl border p-3 text-left disabled:opacity-50', mode === k && 'border-primary bg-accent/40 ring-2 ring-primary/20')}>
+                  <span className="text-sm font-medium">{t}</span><span className="text-xs text-muted-foreground">{d}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+
           <Section title="谁在请求配对">
             <div className="grid gap-3 p-4 text-sm">
               <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">

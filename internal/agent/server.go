@@ -276,6 +276,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/v1/net") || strings.HasPrefix(r.URL.Path, "/v1/plugins") || strings.HasPrefix(r.URL.Path, "/v1/luci/") ||
 		strings.HasPrefix(r.URL.Path, "/v1/store") || r.URL.Path == "/v1/uci/guarded" || r.URL.Path == "/v1/uci/confirm" || r.URL.Path == "/v1/uci/rollback":
 		s.netAPI(w, r, body)
+	case r.Method == "GET" && r.URL.Path == "/v1/lan443":
+		writeJSON(w, 200, GetLAN443())
+	case r.Method == "POST" && r.URL.Path == "/v1/lan443":
+		var req struct {
+			Enabled bool     `json:"enabled"`
+			Names   []string `json:"names"`
+			LanIP   string   `json:"lan_ip"`
+		}
+		_ = json.Unmarshal(body, &req)
+		st, err := SetLAN443(req.Enabled, req.Names, req.LanIP)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": err.Error(), "status": st})
+			return
+		}
+		writeJSON(w, 200, st)
 	case r.Method == "GET" && r.URL.Path == "/v1/tunnel":
 		writeJSON(w, 200, GetTunnelStatus())
 	case r.Method == "POST" && r.URL.Path == "/v1/tunnel":

@@ -104,6 +104,9 @@ func main() {
 	agent.SetTunnelDir(*dataDir)
 	agent.SetIdentityDir(*dataDir)
 	go agent.RunIdentity()
+	if os.Getenv("OWP_COLLECT") != "0" {
+		go agent.StartLAN443() // https://wharf.lan without a port (agent/lan443.go)
+	}
 	go agent.RunProxyStats()
 	handler := agent.NewServer(agent.Config{Listen: *listen, KeyID: *keyID, Secret: *secret, AllowFrom: strings.Fields(*allow), DataDir: *dataDir})
 	// OWP_COLLECT=0 runs an API-only instance (testing) that never touches the firewall

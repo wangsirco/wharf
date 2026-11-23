@@ -61,7 +61,7 @@ func TestBerthKeyAuth(t *testing.T) {
 		sign.SignPrefixed(r, "X-Berth", sign.DeriveKey(tok), raw)
 	}
 	w := call(a, tok, "", a.handleBerthPing, "GET", "/api/ext/berth/v1/ping", nil, func(r *http.Request) { signKey(r, nil) })
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"protocol":2`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"protocol":3`) {
 		t.Fatalf("key ping %d %s", w.Code, w.Body)
 	}
 	if !a.berth().KeyAuth {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Ban, Pin, RefreshCw, Search, ShieldCheck } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
@@ -41,7 +41,8 @@ export default function Devices() {
   const { data, error, reload } = useApi<Device[]>('/devices', 10000)
   const { can } = useAuth()
   const berth = useBerth()
-  const [q, setQ] = useState('')
+  const [sp] = useSearchParams()
+  const [q, setQ] = useState(sp.get('q') ?? '')
   const [filter, setFilter] = useState('online')
   const [sort, setSort] = useState<'ip' | 'speed'>('speed')
   const navigate = useNavigate()

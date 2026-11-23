@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Globe2 } from 'lucide-react'
 import { useApi } from '@/lib/hooks'
 import { bytes } from '@/lib/format'
@@ -33,7 +34,8 @@ export function CountryRanking({ data, limit = 15 }: { data: GeoFlows | null; li
 }
 
 export default function World() {
-  const [range, setRange] = useState('24h')
+  const [sp] = useSearchParams()
+  const [range, setRange] = useState(['1h', '24h', '7d'].includes(sp.get('range') ?? '') ? sp.get('range')! : '24h')
   const { data } = useApi<GeoFlows>(`/geo/flows?range=${range}`, range === '1h' ? 60000 : 300000)
   const n = data?.countries?.length ?? 0
   // scanners, NTP pools and P2P touch dozens of countries with a few KB each

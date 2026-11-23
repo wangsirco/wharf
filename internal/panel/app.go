@@ -272,6 +272,7 @@ func (a *App) Start() {
 	go a.identityLoop()
 	cfAccountToken = func() string { return a.setting("cloudflare.token") }
 	go a.panelNamesLoop()
+	go a.lan443Loop()
 	log.Printf("panel ready")
 }
 
