@@ -59,3 +59,40 @@ func TestSplit(t *testing.T) {
 		c.Close()
 	}
 }
+
+// An idle connection is closed after IdleTimeout instead of being held forever.
+func TestSplitIdle(t *testing.T) {
+	old := IdleTimeout
+	IdleTimeout = 300 * time.Millisecond
+	defer func() { IdleTimeout = old }()
+	back, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer back.Close()
+	go func() {
+		for {
+			c, err := back.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _ = io.Copy(io.Discard, c); c.Close() }() // a backend that never closes first
+		}
+	}()
+	s := &Split{Panel: back.Addr().String(), Other: back.Addr().String()}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go s.Serve(ln)
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_, _ = c.Write([]byte("GET / HTTP/1.1\r\n\r\n")) // plain: goes to Other
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := c.Read(make([]byte, 1)); err == nil || isTimeout(err) {
+		t.Fatalf("idle connection not closed: %v", err)
+	}
+}
+
+func isTimeout(err error) bool {
+	ne, ok := err.(net.Error)
+	return ok && ne.Timeout()
+}

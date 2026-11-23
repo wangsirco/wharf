@@ -3,6 +3,7 @@ package proxyfront
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -57,21 +58,59 @@ func (s *Split) Route(name string) string {
 	return s.Other
 }
 
+// MaxConns bounds the connections in flight; more wait in the kernel's queue. A home
+// network needs a few dozen; the bound keeps a misbehaving client from using up the
+// process's file handles (each connection holds two sockets and a splice pipe pair).
+const MaxConns = 512
+
+// IdleTimeout closes a connection that moved no data either way for this long.
+var IdleTimeout = 10 * time.Minute
+
+// Serve accepts until the listener is closed. Any other accept error (out of file
+// handles, …) is waited out — the firewall keeps sending LAN 443 here, so this must not stop.
 func (s *Split) Serve(ln net.Listener) error {
+	sem := make(chan struct{}, MaxConns)
 	var tempDelay time.Duration
 	for {
+		sem <- struct{}{}
 		c, err := ln.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				tempDelay = max(5*time.Millisecond, min(2*tempDelay, time.Second))
-				time.Sleep(tempDelay)
-				continue
+			<-sem
+			if errors.Is(err, net.ErrClosed) {
+				return err
 			}
-			return err
+			tempDelay = max(5*time.Millisecond, min(2*tempDelay, time.Second))
+			log.Printf("lan443: accept: %v (retrying)", err)
+			time.Sleep(tempDelay)
+			continue
 		}
 		tempDelay = 0
-		go s.handle(c)
+		go func() {
+			defer func() { <-sem }()
+			s.handle(&idleConn{Conn: c})
+		}()
 	}
+}
+
+// idleConn pushes its deadline forward on every read or write.
+type idleConn struct{ net.Conn }
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	_ = c.Conn.SetDeadline(time.Now().Add(IdleTimeout))
+	return c.Conn.Read(p)
+}
+
+func (c *idleConn) Write(p []byte) (int, error) {
+	_ = c.Conn.SetDeadline(time.Now().Add(IdleTimeout))
+	return c.Conn.Write(p)
+}
+
+// CloseWrite lets pipe half-close the client side like a plain TCP connection.
+func (c *idleConn) CloseWrite() error {
+	if tc, ok := c.Conn.(*net.TCPConn); ok {
+		return tc.CloseWrite()
+	}
+	return nil
 }
 
 func (s *Split) handle(c net.Conn) {

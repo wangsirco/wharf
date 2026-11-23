@@ -156,14 +156,18 @@ func main() {
 		// the 443 front hands the panel's public names to this loopback port with a PROXY
 		// protocol header carrying the visitor's address (panel/panelname.go)
 		if pln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", panel.PanelProxyPort)); err == nil {
-			psrv := &http.Server{Handler: srv.Handler, TLSConfig: srv.TLSConfig, ReadHeaderTimeout: 10 * time.Second}
+			// same timeouts as the main port: without IdleTimeout, keep-alive connections that
+			// clients never close stay forever (they held the agent's splitter open until it
+			// ran out of file handles, 0.25.0-0)
+			psrv := &http.Server{Handler: srv.Handler, TLSConfig: srv.TLSConfig, ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout: srv.ReadTimeout, WriteTimeout: srv.WriteTimeout, IdleTimeout: srv.IdleTimeout}
 			go func() { _ = psrv.Serve(tls.NewListener(tlsutil.ProxyListener{Listener: pln}, srv.TLSConfig)) }()
 		} else {
 			log.Printf("panel: loopback port for the 443 front: %v", err)
 		}
 		tlsLn, plainLn := tlsutil.SplitListener(ln)
 		go func() {
-			_ = (&http.Server{Handler: http.HandlerFunc(toHTTPS), ReadHeaderTimeout: 10 * time.Second}).Serve(plainLn)
+			_ = (&http.Server{Handler: http.HandlerFunc(toHTTPS), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}).Serve(plainLn)
 		}()
 		log.Printf("owp-panel listening on https://%s (local CA %s, sha256 %s; LAN %v)", cfg.Listen, ca.CAName(), ca.CAFingerprint(), tlsutil.LocalAddrs())
 		log.Fatal(srv.Serve(tls.NewListener(tlsLn, srv.TLSConfig)))

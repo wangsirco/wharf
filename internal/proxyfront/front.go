@@ -328,7 +328,7 @@ func (f *front) pipe(client net.Conn, raw net.Conn, r Route) {
 	}()
 	go func() {
 		_, _ = io.Copy(raw, up)
-		if tc, ok := raw.(*net.TCPConn); ok {
+		if tc, ok := raw.(interface{ CloseWrite() error }); ok { // *net.TCPConn, or the splitter's idleConn
 			_ = tc.CloseWrite()
 		}
 		done <- struct{}{}

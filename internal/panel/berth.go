@@ -333,9 +333,17 @@ func pinOrPublic(fp string, pinned *atomic.Bool) *tls.Config {
 	}
 }
 
+// pinnedTransports: one per fingerprint, reused, idle connections closed after 90 s. A new
+// transport per call (≤ 0.25.0-0) left a keep-alive connection open on Berth for every call.
+var pinnedTransports sync.Map
+
 func pinnedClient(fp string, timeout time.Duration) *http.Client {
-	tr := &http.Transport{TLSClientConfig: pinOrPublic(fp, nil), Proxy: nil, ResponseHeaderTimeout: timeout}
-	return &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	tr, ok := pinnedTransports.Load(fp)
+	if !ok {
+		tr, _ = pinnedTransports.LoadOrStore(fp, &http.Transport{TLSClientConfig: pinOrPublic(fp, nil), Proxy: nil, ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout: 90 * time.Second, MaxIdleConnsPerHost: 2, TLSHandshakeTimeout: 10 * time.Second})
+	}
+	return &http.Client{Timeout: timeout, Transport: tr.(*http.Transport), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 // selfFingerprint: what Berth should pin for this panel — the local CA (stable across leaf

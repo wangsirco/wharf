@@ -567,7 +567,7 @@ func (a *App) apiIP(api string, v6 bool, dev string) (string, error) {
 	}
 	d := &net.Dialer{Timeout: 8 * time.Second, Control: bindToDevice(dev)}
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) { return d.DialContext(ctx, network, addr) },
-		TLSHandshakeTimeout: 8 * time.Second}
+		TLSHandshakeTimeout: 8 * time.Second, DisableKeepAlives: true} // a transport per call: nothing to keep
 	cl := &http.Client{Timeout: 12 * time.Second, Transport: tr}
 	req, _ := http.NewRequest("GET", u, nil)
 	req.Header.Set("User-Agent", "curl/8.5.0")

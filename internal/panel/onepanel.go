@@ -51,7 +51,7 @@ func onePanelClient(base string) *http.Client {
 	// a LAN 1Panel usually has a self-signed certificate; only private addresses skip the check
 	if u, err := url.Parse(base); err == nil {
 		if ip, err := netip.ParseAddr(u.Hostname()); err == nil && ip.IsPrivate() {
-			c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+			c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, DisableKeepAlives: true}
 		}
 	}
 	return c

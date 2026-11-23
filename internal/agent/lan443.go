@@ -88,6 +88,32 @@ func uciGetList(config, section, option string) []string {
 	return nil
 }
 
+// WatchLAN443 keeps the splitter up while the redirect sends LAN 443 to it. If it cannot
+// listen, the redirect goes (443 back to uhttpd alone) rather than leaving names dead.
+func WatchLAN443() {
+	for {
+		time.Sleep(30 * time.Second)
+		lan443.Lock()
+		up := lan443.listening
+		lan443.Unlock()
+		if up || uciGetOption("owp", "lan443", "enabled") != "1" {
+			continue
+		}
+		StartLAN443()
+		lan443.Lock()
+		up = lan443.listening
+		lan443.Unlock()
+		if !up {
+			if fw, err := uciGetConfig("firewall"); err == nil {
+				if _, ok := fw[lan443Section]; ok {
+					log.Printf("lan443: splitter not listening (%s); removing the redirect", lan443.err)
+					_, _ = Apply([]Change{{Op: "delete", Config: "firewall", Section: lan443Section}})
+				}
+			}
+		}
+	}
+}
+
 func GetLAN443() LAN443Status {
 	lan443.Lock()
 	st := LAN443Status{Enabled: uciGetOption("owp", "lan443", "enabled") == "1", Names: lan443.split.Names(), Listening: lan443.listening, Error: lan443.err}

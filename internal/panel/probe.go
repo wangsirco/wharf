@@ -180,7 +180,8 @@ func (a *App) probe(ip string, port int, domain string) *Probe {
 		host = ip
 	}
 	cl := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: domain},
+		DisableKeepAlives: true,
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true, ServerName: domain},
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, probeTarget(ip, hport))
 		},

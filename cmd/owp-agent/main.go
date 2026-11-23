@@ -106,6 +106,7 @@ func main() {
 	go agent.RunIdentity()
 	if os.Getenv("OWP_COLLECT") != "0" {
 		go agent.StartLAN443() // https://wharf.lan without a port (agent/lan443.go)
+		go agent.WatchLAN443()
 	}
 	go agent.RunProxyStats()
 	handler := agent.NewServer(agent.Config{Listen: *listen, KeyID: *keyID, Secret: *secret, AllowFrom: strings.Fields(*allow), DataDir: *dataDir})

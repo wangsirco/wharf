@@ -72,7 +72,7 @@ func validPVESetting(key, value string) (bool, error) {
 // pveClient returns an HTTP client that only trusts a certificate with the given
 // fingerprint; an empty pin records the presented fingerprint into *seen instead.
 func pveClient(pin string, seen *string) *http.Client {
-	tr := &http.Transport{TLSClientConfig: &tls.Config{
+	tr := &http.Transport{DisableKeepAlives: true, TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // replaced by the pin check below
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
