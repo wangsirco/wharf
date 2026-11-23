@@ -129,7 +129,8 @@ func Run(path string) error {
 
 	errc := make(chan error, 2)
 	if cfg.HTTPListen != "" {
-		srv := &http.Server{Addr: cfg.HTTPListen, Handler: f.site, ReadHeaderTimeout: 15 * time.Second}
+		srv := &http.Server{Addr: cfg.HTTPListen, Handler: f.site, ReadHeaderTimeout: 15 * time.Second,
+			ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 		go func() { errc <- srv.ListenAndServe() }()
 	}
 	if cfg.Listen != "" {
@@ -143,21 +144,36 @@ func Run(path string) error {
 	return <-errc
 }
 
+// FrontMaxConns bounds the front's connections in flight (it faces the internet; each
+// connection holds two sockets). Proxy users rarely need more than a few hundred.
+const FrontMaxConns = 1500
+
+// FrontIdle closes a connection that moved nothing either way for this long (proxy
+// clients reconnect by themselves).
+var FrontIdle = 30 * time.Minute
+
 func (f *front) serve(ln net.Listener) error {
+	sem := make(chan struct{}, FrontMaxConns)
 	var tempDelay time.Duration
 	for {
+		sem <- struct{}{}
 		c, err := ln.Accept()
 		if err != nil {
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				tempDelay = max(5*time.Millisecond, min(2*tempDelay, time.Second))
-				time.Sleep(tempDelay)
-				continue
+			<-sem
+			if errors.Is(err, net.ErrClosed) {
+				return err
 			}
-			return err
+			// out of file handles and the like: wait it out, never stop serving 443
+			tempDelay = max(5*time.Millisecond, min(2*tempDelay, time.Second))
+			log.Printf("front: accept: %v (retrying)", err)
+			time.Sleep(tempDelay)
+			continue
 		}
 		tempDelay = 0
-		go f.handle(c)
+		go func() {
+			defer func() { <-sem }()
+			f.handle(&idleConn{Conn: c, idle: FrontIdle})
+		}()
 	}
 }
 
@@ -411,7 +427,7 @@ func (c *closeNotify) Close() error {
 
 func (f *front) serveHTTP(c net.Conn) {
 	l := &oneConnListener{c: c, done: make(chan struct{})}
-	srv := &http.Server{Handler: f.site, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Handler: f.site, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	_ = srv.Serve(l)
 }
 

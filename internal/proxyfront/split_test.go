@@ -96,3 +96,53 @@ func isTimeout(err error) bool {
 	ne, ok := err.(net.Error)
 	return ok && ne.Timeout()
 }
+
+type flakyLn struct {
+	net.Listener
+	n int
+}
+
+func (f *flakyLn) Accept() (net.Conn, error) {
+	if f.n++; f.n <= 3 {
+		return nil, &net.OpError{Op: "accept", Net: "tcp", Err: errEMFILE}
+	}
+	return f.Listener.Accept()
+}
+
+var errEMFILE = &net.AddrError{Err: "too many open files"}
+
+// The splitter and the WAN front keep serving after "too many open files".
+func TestServeSurvivesAcceptErrors(t *testing.T) {
+	back, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer back.Close()
+	arrived := make(chan struct{}, 2)
+	go func() {
+		for {
+			c, err := back.Accept()
+			if err != nil {
+				return
+			}
+			arrived <- struct{}{}
+			c.Close()
+		}
+	}()
+	for _, serve := range []func(net.Listener) error{
+		(&Split{Panel: back.Addr().String(), Other: back.Addr().String()}).Serve,
+		(&front{cfg: Config{Fallback: back.Addr().String()}}).serve,
+	} {
+		ln, _ := net.Listen("tcp", "127.0.0.1:0")
+		go serve(&flakyLn{Listener: ln})
+		c, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = c.Write([]byte("GET / HTTP/1.1\r\n\r\n"))
+		select {
+		case <-arrived:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stopped serving after accept errors")
+		}
+		c.Close()
+		ln.Close()
+	}
+}

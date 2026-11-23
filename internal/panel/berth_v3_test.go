@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wangsirco/wharf/internal/sign"
 )
@@ -120,5 +122,19 @@ func TestStepErr(t *testing.T) {
 	}
 	if s := stepErr("https://mini.lan", errors.New("对方证书与配对时记录的指纹不符")); !strings.Contains(s, "证书不对") {
 		t.Fatal(s)
+	}
+}
+
+// Addresses that failed once and never came back don't pile up in the limiter.
+func TestLimiterForgets(t *testing.T) {
+	l := newLimiter(5, time.Millisecond)
+	for i := range 6000 {
+		l.record("ip:" + strconv.Itoa(i))
+		if i%1000 == 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	if n := len(l.fail); n > 2001 {
+		t.Fatalf("%d keys kept", n)
 	}
 }

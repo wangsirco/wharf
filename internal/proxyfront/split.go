@@ -87,22 +87,41 @@ func (s *Split) Serve(ln net.Listener) error {
 		tempDelay = 0
 		go func() {
 			defer func() { <-sem }()
-			s.handle(&idleConn{Conn: c})
+			s.handle(&idleConn{Conn: c, idle: IdleTimeout})
 		}()
 	}
 }
 
-// idleConn pushes its deadline forward on every read or write.
-type idleConn struct{ net.Conn }
+// idleConn pushes its deadline forward on every read or write, so only a connection that
+// moves nothing either way for idle is closed. A read deadline set by the code using it
+// (10 s for the ClientHello) holds until that code clears it.
+type idleConn struct {
+	net.Conn
+	idle  time.Duration
+	fixed bool // a caller's read deadline is in force
+}
 
 func (c *idleConn) Read(p []byte) (int, error) {
-	_ = c.Conn.SetDeadline(time.Now().Add(IdleTimeout))
+	if !c.fixed {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	}
 	return c.Conn.Read(p)
 }
 
 func (c *idleConn) Write(p []byte) (int, error) {
-	_ = c.Conn.SetDeadline(time.Now().Add(IdleTimeout))
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+	if !c.fixed {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	}
 	return c.Conn.Write(p)
+}
+
+func (c *idleConn) SetReadDeadline(t time.Time) error {
+	c.fixed = !t.IsZero()
+	if t.IsZero() {
+		t = time.Now().Add(c.idle)
+	}
+	return c.Conn.SetReadDeadline(t)
 }
 
 // CloseWrite lets pipe half-close the client side like a plain TCP connection.

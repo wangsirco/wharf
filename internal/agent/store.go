@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -197,7 +198,9 @@ func CheckInstall(pkg string) (StoreCheck, error) {
 	if hasTr {
 		args = append(args, tr)
 	}
-	out, _ := exec.Command("opkg", args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute) // a dry run; a stuck feed must not hang the request
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, "opkg", args...).CombinedOutput()
 	c := StoreCheck{Pkg: pkg, FreeBytes: overlayFree(), Output: strings.TrimSpace(string(out))}
 	for _, m := range installingRe.FindAllStringSubmatch(string(out), -1) {
 		c.Installs = append(c.Installs, m[1]+" "+m[2])
@@ -284,7 +287,12 @@ func runStore(action string, pkgs []string) {
 	}
 	opkg := func(args ...string) error {
 		storeLog("$ opkg " + strings.Join(args, " "))
-		out, err := exec.Command("opkg", args...).CombinedOutput()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute) // else a stalled download keeps the job "running" for ever
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "opkg", args...).CombinedOutput()
+		if ctx.Err() != nil {
+			err = errors.New("opkg 15 分钟没有完成，已停止（多半是软件源下载卡住了）")
+		}
 		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
 				storeLog(l)

@@ -29,9 +29,10 @@ func (s *splitter) loop() {
 	for {
 		c, err := s.Listener.Accept()
 		if err != nil {
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				time.Sleep(50 * time.Millisecond)
+			// only a closed listener ends this; out of file handles and the like are waited out
+			// (returning took the panel's port down for good)
+			if !errors.Is(err, net.ErrClosed) {
+				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 			s.err = err

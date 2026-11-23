@@ -147,6 +147,10 @@ func (l *loginLimiter) recent(k string) []time.Time {
 			keep = append(keep, t)
 		}
 	}
+	if len(keep) == 0 {
+		delete(l.fail, k) // one entry per address that ever failed would otherwise pile up
+		return nil
+	}
 	l.fail[k] = keep
 	return keep
 }
@@ -156,6 +160,11 @@ func (l *loginLimiter) record(keys ...string) {
 	defer l.mu.Unlock()
 	for _, k := range keys {
 		l.fail[k] = append(l.recent(k), time.Now())
+	}
+	if len(l.fail) > 2000 { // addresses that failed once and never came back
+		for k := range l.fail {
+			l.recent(k)
+		}
 	}
 }
 

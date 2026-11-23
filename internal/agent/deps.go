@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -219,8 +220,12 @@ func runDeps(action string, ids []string, defs map[string]depDef) {
 	}
 	opkg := func(args ...string) error {
 		depLog("$ opkg " + strings.Join(args, " "))
-		cmd := exec.Command("opkg", args...)
-		out, err := cmd.CombinedOutput()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "opkg", args...).CombinedOutput()
+		if ctx.Err() != nil {
+			err = errors.New("opkg 15 分钟没有完成，已停止（多半是软件源下载卡住了）")
+		}
 		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
 				depLog(l)

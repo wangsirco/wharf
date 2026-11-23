@@ -129,7 +129,9 @@ func main() {
 		Addr:              *listen,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       120 * time.Second, // config backups of ~20 MB come in on the loopback
 		WriteTimeout:      90 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	log.Printf("owp-agent %s listening on %s (tls=%v, firewall=%s)", agent.Version, *listen, *useTLS, agent.FirewallFlavor())
 	if *useTLS {
