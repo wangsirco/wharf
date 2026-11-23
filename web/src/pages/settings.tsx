@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Download, Loader2, RefreshCw } from 'lucide-react'
 import { get, post, put } from '@/lib/api'
@@ -12,6 +12,7 @@ import { Dot, Field, Section, useConfirm } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type Settings = Record<string, string>
 interface AgentStatus { ok: boolean; url: string; error?: string; version?: string; hostname?: string; firewall?: string; time?: number }
@@ -25,8 +26,15 @@ const retention = [
   { key: 'presence.away_minutes', label: '离开网络判定（分钟）', hint: '设备连续这么久没有出现在网络中，记为「离开网络」；3-240，太短会让休眠的手机反复上下线' },
 ]
 
+// The four tabs; SETTING_TAB says which tab a settings key is saved from (for the dot
+// that marks unsaved changes, and for search results that jump to a setting).
+export const SETTINGS_TABS = [['', '常规'], ['data', '数据源'], ['link', '外网与联动'], ['update', '更新与维护']] as const
+const keyTab = (k: string) => (/^(identity|nextdns|dns|pve|rules|geo)\./.test(k) ? 'data' : /^update\./.test(k) ? 'update' : '')
+
 export default function SettingsPage() {
   const { meta } = useAuth()
+  const [q, setQ] = useSearchParams()
+  const tab = q.get('tab') ?? ''
   const [s, setS] = useState<Settings | null>(null)
   const [draft, setDraft] = useState<Settings>({})
   const { data: agent, reload: reloadAgent } = useApi<AgentStatus>('/agent/status')
@@ -40,6 +48,7 @@ export default function SettingsPage() {
   const toggleApproval = (k: string, on: boolean) =>
     setDraft({ ...draft, 'approval.required': JSON.stringify(on ? [...required, k] : required.filter((x) => x !== k)) })
   const dirty = Object.keys(draft).filter((k) => draft[k] !== s[k])
+  const tabDirty = (t: string) => dirty.filter((k) => keyTab(k) === t).length
 
   const save = async () => {
     try {
@@ -64,7 +73,13 @@ export default function SettingsPage() {
       <PageHeader title="系统设置" desc="所有设置的修改都会记入审计，并可还原。">
         <Button size="sm" disabled={!dirty.length} onClick={save}>保存{dirty.length ? `（${dirty.length}）` : ''}</Button>
       </PageHeader>
+      <Tabs value={tab} onValueChange={(v) => setQ(v ? { tab: String(v) } : {}, { replace: true })}>
+        <TabsList className="mb-4">
+          {SETTINGS_TABS.map(([k, l]) => <TabsTrigger key={k} value={k} className="px-3">{l}{tabDirty(k) > 0 && <span className="ml-1 size-1.5 rounded-full bg-primary" />}</TabsTrigger>)}
+        </TabsList>
+      </Tabs>
       <div className="grid gap-4 xl:grid-cols-2">
+        {tab === '' && <>
         <Section title="面板名称" desc="显示在登录页、侧栏、浏览器标签和「添加到主屏幕」的图标名称上">
           <div className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="名称" hint="最多 24 个字符"><Input maxLength={24} value={draft['ui.name'] ?? ''} placeholder="Wharf" onChange={(e) => setDraft({ ...draft, 'ui.name': e.target.value })} /></Field>
@@ -75,18 +90,6 @@ export default function SettingsPage() {
                 {['Pacific/Auckland', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Singapore', 'Australia/Sydney', 'Australia/Melbourne', 'Europe/London', 'America/Los_Angeles', 'America/New_York', 'America/Vancouver', 'America/Toronto', 'UTC'].map((z) => <option key={z} value={z} />)}
               </datalist>
             </Field>
-          </div>
-        </Section>
-        <Section title="设备识别" desc="用于判断隐私 MAC、没有主机名的设备是什么。两项都只读取信息，不改变设备。">
-          <div className="divide-y">
-            <label className="flex items-center justify-between gap-4 px-4 py-3">
-              <span><span className="text-sm">DHCP 指纹</span><span className="block text-xs text-muted-foreground">让 dnsmasq 记录设备获取地址时请求的参数（iPhone、安卓、Windows、电视各不相同）。设备下次续租或重连 Wi-Fi 时生效</span></span>
-              <Switch checked={draft['identity.dhcp_log'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.dhcp_log': c ? '1' : '0' })} />
-            </label>
-            <label className="flex items-center justify-between gap-4 px-4 py-3">
-              <span><span className="text-sm">询问设备名称和型号</span><span className="block text-xs text-muted-foreground">每 10 分钟用 Bonjour（mDNS）和 UPnP 问一次在线设备：苹果设备、电视、打印机、游戏机等会报出自己的名称和型号</span></span>
-              <Switch checked={draft['identity.probe'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.probe': c ? '1' : '0' })} />
-            </label>
           </div>
         </Section>
         <Section title="敏感操作二次确认" desc="开启后，普通管理员执行该操作需要超级管理员批准；超级管理员本人不受限制。">
@@ -112,6 +115,56 @@ export default function SettingsPage() {
             ))}
           </div>
         </Section>
+        </>}
+        {tab === 'data' && <>
+        <Section title="设备识别" desc="用于判断隐私 MAC、没有主机名的设备是什么。两项都只读取信息，不改变设备。">
+          <div className="divide-y">
+            <label className="flex items-center justify-between gap-4 px-4 py-3">
+              <span><span className="text-sm">DHCP 指纹</span><span className="block text-xs text-muted-foreground">让 dnsmasq 记录设备获取地址时请求的参数（iPhone、安卓、Windows、电视各不相同）。设备下次续租或重连 Wi-Fi 时生效</span></span>
+              <Switch checked={draft['identity.dhcp_log'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.dhcp_log': c ? '1' : '0' })} />
+            </label>
+            <label className="flex items-center justify-between gap-4 px-4 py-3">
+              <span><span className="text-sm">询问设备名称和型号</span><span className="block text-xs text-muted-foreground">每 10 分钟用 Bonjour（mDNS）和 UPnP 问一次在线设备：苹果设备、电视、打印机、游戏机等会报出自己的名称和型号</span></span>
+              <Switch checked={draft['identity.probe'] === '1'} onCheckedChange={(c) => setDraft({ ...draft, 'identity.probe': c ? '1' : '0' })} />
+            </label>
+          </div>
+        </Section>
+        <NextDNSSettings draft={draft} setDraft={setDraft} saved={s} />
+        <PVESettings draft={draft} setDraft={setDraft} saved={s} />
+        <Section title="IP 离线库" desc="DB-IP Lite（City + ASN），每月自动更新，用于访问记录的 ASN / 运营商 / 位置 / 时区判断。">
+          <div className="p-4"><Button variant="outline" size="sm" disabled={geoBusy} onClick={updateGeo}><RefreshCw className={geoBusy ? 'animate-spin' : ''} /> 立即更新</Button></div>
+        </Section>
+        <Section title="内容识别规则库" desc="来自 blackmatrix7/ios_rule_script，另含 AI 等新平台的补充规则，约 290 个服务。程序内置一份，并按下面的间隔自动在线更新。">
+          <div className="flex flex-wrap items-end gap-3 p-4">
+            <Field label="自动更新间隔">
+              <select className="h-8 rounded-lg border bg-transparent px-2 text-sm" value={draft['rules.update_hours'] ?? '72'} onChange={(e) => setDraft({ ...draft, 'rules.update_hours': e.target.value })}>
+                {[['0', '不自动更新'], ['6', '每 6 小时'], ['12', '每 12 小时'], ['24', '每天'], ['72', '每 3 天'], ['168', '每周']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Button variant="outline" size="sm" disabled={rulesBusy} onClick={updateRules}><RefreshCw className={rulesBusy ? 'animate-spin' : ''} /> 立即更新</Button>
+            <span className="pb-1.5 text-xs text-muted-foreground">上次在线更新：{s?.['rules.updated_at'] ? datetime(Number(s['rules.updated_at'])) : '从未（使用内置规则）'}</span>
+          </div>
+        </Section>
+        </>}
+        {tab === 'link' && <>
+        <Section title="外网访问" desc="面板的公网域名、Cloudflare 隧道、谁能从外面打开，都在「外网访问」一页里。">
+          <div className="flex flex-wrap gap-2 p-4">
+            <Button variant="outline" size="sm" render={<Link to="/remote" />}>打开「外网访问」</Button>
+            <Button variant="ghost" size="sm" render={<Link to="/remote#panel-names" />}>面板域名</Button>
+            <Button variant="ghost" size="sm" render={<Link to="/access" />}>面板访问控制</Button>
+          </div>
+        </Section>
+        <Section title="联动" desc="和其他服务对接：Cloudflare（域名、隧道、防攻击）和 Berth 服务器面板。">
+          <div className="flex flex-wrap gap-2 p-4">
+            <Button variant="outline" size="sm" render={<Link to="/cloudflare" />}>Cloudflare</Button>
+            <Button variant="outline" size="sm" render={<Link to="/berth" />}>Berth 服务器面板</Button>
+            <Button variant="ghost" size="sm" render={<Link to="/ddns" />}>DDNS</Button>
+            <Button variant="ghost" size="sm" render={<Link to="/alerts" />}>告警通知</Button>
+          </div>
+        </Section>
+        </>}
+        {tab === 'update' && <>
+        <UpdateSettings draft={draft} setDraft={setDraft} />
         <Section title="路由器 Agent" action={<Button variant="ghost" size="sm" onClick={reloadAgent}><RefreshCw /> 检测</Button>}>
           <dl className="grid grid-cols-[7rem_1fr] gap-y-2.5 p-4 text-sm">
             <dt className="text-muted-foreground">状态</dt>
@@ -125,29 +178,7 @@ export default function SettingsPage() {
             </>}
           </dl>
         </Section>
-        <Section title="IP 离线库" desc="DB-IP Lite（City + ASN），每月自动更新，用于访问记录的 ASN / 运营商 / 位置 / 时区判断。">
-          <div className="p-4"><Button variant="outline" size="sm" disabled={geoBusy} onClick={updateGeo}><RefreshCw className={geoBusy ? 'animate-spin' : ''} /> 立即更新</Button></div>
-        </Section>
-        <Section title="外网访问与 Berth" desc="面板的公网域名、隧道和谁能从外面打开，都搬到了「外网访问」；Berth 配对在「联动 → Berth 服务器面板」。">
-          <div className="flex flex-wrap gap-2 p-4">
-            <Button variant="outline" size="sm" render={<Link to="/remote" />}>打开「外网访问」</Button>
-            <Button variant="ghost" size="sm" render={<Link to="/berth" />}>Berth 服务器面板</Button>
-          </div>
-        </Section>
-        <NextDNSSettings draft={draft} setDraft={setDraft} saved={s} />
-        <PVESettings draft={draft} setDraft={setDraft} saved={s} />
-        <UpdateSettings draft={draft} setDraft={setDraft} />
-        <Section title="内容识别规则库" desc="来自 blackmatrix7/ios_rule_script，另含 AI 等新平台的补充规则，约 290 个服务。程序内置一份，并按下面的间隔自动在线更新。">
-          <div className="flex flex-wrap items-end gap-3 p-4">
-            <Field label="自动更新间隔">
-              <select className="h-8 rounded-lg border bg-transparent px-2 text-sm" value={draft['rules.update_hours'] ?? '72'} onChange={(e) => setDraft({ ...draft, 'rules.update_hours': e.target.value })}>
-                {[['0', '不自动更新'], ['6', '每 6 小时'], ['12', '每 12 小时'], ['24', '每天'], ['72', '每 3 天'], ['168', '每周']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </Field>
-            <Button variant="outline" size="sm" disabled={rulesBusy} onClick={updateRules}><RefreshCw className={rulesBusy ? 'animate-spin' : ''} /> 立即更新</Button>
-            <span className="pb-1.5 text-xs text-muted-foreground">上次在线更新：{s?.['rules.updated_at'] ? datetime(Number(s['rules.updated_at'])) : '从未（使用内置规则）'}</span>
-          </div>
-        </Section>
+        </>}
       </div>
     </>
   )

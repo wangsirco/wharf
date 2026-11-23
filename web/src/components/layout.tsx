@@ -15,6 +15,7 @@ import { sendBeacon } from '@/lib/beacon'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/brand-mark'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { MobileBar } from '@/components/mobile-bar'
 import { CommandPalette } from '@/components/command'
 import { ModeSwitch, useMode } from '@/lib/mode'
 import { Button } from '@/components/ui/button'
@@ -191,13 +192,14 @@ export function Layout() {
           <UserMenu />
         </header>
         <NetBanner />
-        <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6">
+        <main className="min-w-0 flex-1 p-3 pb-20 sm:p-4 sm:pb-20 md:p-6">
           <div className="flex gap-8">
             <div className="min-w-0 flex-1"><TocBar /><ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary></div>
             <TocSide />
           </div>
         </main>
         <CommandPalette />
+        <MobileBar />
       </div>
     </div>
   )
@@ -243,7 +245,7 @@ function UpdateBadge() {
   const { data } = useApi<{ newer: boolean; latest?: string }>(isSuper ? '/update' : null, 30 * 60 * 1000)
   if (!data?.newer) return null
   return (
-    <NavLink to="/settings#update" className="hidden shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success hover:bg-success/20 sm:flex">
+    <NavLink to="/settings?tab=update" className="hidden shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success hover:bg-success/20 sm:flex">
       <ArrowUpCircle className="size-3.5" />新版本 {data.latest}
     </NavLink>
   )

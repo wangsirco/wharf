@@ -18,3 +18,6 @@ createRoot(document.getElementById('root')!).render(
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {})
 }
+
+// a reload after a panel update (error-boundary.tsx) happens once; a page that stays up clears the flag
+setTimeout(() => sessionStorage.removeItem('owp-chunk-reload'), 15000)

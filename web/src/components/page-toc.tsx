@@ -11,6 +11,9 @@ interface Item { id: string; title: string; el: HTMLElement }
 
 const MIN = 4
 
+/** The anchor a section gets from its title: link to `/page#${tocId('标题')}`. */
+export const tocId = (title: string) => 'sec-' + encodeURIComponent(title).replace(/%/g, '').slice(0, 40)
+
 function useTocItems() {
   const loc = useLocation()
   const [items, setItems] = useState<Item[]>([])
@@ -27,7 +30,7 @@ function useTocItems() {
         const next = els.map((el) => {
           const title = el.dataset.toc ?? ''
           seen[title] = (seen[title] ?? 0) + 1
-          const id = 'sec-' + encodeURIComponent(title).replace(/%/g, '').slice(0, 40) + (seen[title] > 1 ? '-' + seen[title] : '')
+          const id = tocId(title) + (seen[title] > 1 ? '-' + seen[title] : '')
           if (el.id !== id) el.id = id
           return { id, title, el }
         })
@@ -57,11 +60,20 @@ function useTocItems() {
   }, [items])
 
   // open the section named in the URL hash (#sec-…), e.g. from search or another page
+  // (any element id works too, e.g. #panel-names; the page may still be loading)
+  const [done, setDone] = useState('')
   useEffect(() => {
-    if (!loc.hash || !items.length) return
+    const key = loc.pathname + loc.search + loc.hash
+    if (!loc.hash || done === key) return
     const it = items.find((x) => '#' + x.id === loc.hash)
-    if (it) it.el.scrollIntoView({ block: 'start' })
-  }, [loc.hash, items])
+    const el = it?.el ?? document.getElementById(decodeURIComponent(loc.hash.slice(1)))
+    if (el) {
+      el.scrollIntoView({ block: 'start' })
+      el.classList.add('toc-flash')
+      setTimeout(() => el.classList.remove('toc-flash'), 1600)
+      setDone(key)
+    }
+  }, [loc.pathname, loc.search, loc.hash, items, done])
 
   return { items: items.length >= MIN ? items : [], active }
 }

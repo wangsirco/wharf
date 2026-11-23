@@ -131,7 +131,7 @@ export default function DNS() {
         </div>
       }>
         {logErr && <div className="p-4"><ErrorBox>{logErr}</ErrorBox></div>}
-        <Table>
+        <Table cards>
           <TableHeader><TableRow><TableHead className="pl-4">时间</TableHead><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead>原因</TableHead><TableHead className="pr-4">设备</TableHead></TableRow></TableHeader>
           <TableBody>
             {logs?.data?.map((l, i) => (

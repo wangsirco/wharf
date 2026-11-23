@@ -5,6 +5,7 @@ import { post, put } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { datetime } from '@/lib/format'
 import { berthStatus } from '@/lib/berth'
+import { BerthConn } from '@/components/berth-pair'
 import { Dot, Field, Pill, Section } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -60,7 +61,7 @@ export function BerthCard() {
             <Anchor className="mt-0.5 size-5 shrink-0 text-primary" />
             <div className="grid gap-1">
               <div className="font-medium">尚未配对</div>
-              <p className="text-muted-foreground">在 Berth 的「设置 → 集成 → Wharf」里填上 Wharf 的地址，它会把你带回这里确认。配对后：建站时自动映射端口或登记 443 分流、DDNS 由一方维护、封禁可以同步、告警只收一份、两边互相跳转不用再登录。</p>
+              <p className="text-muted-foreground">在「Berth 服务器面板」页打开「允许 Berth 申请绑定」，再到 Berth 里点「面板互联 → 内网发现」；或在 Berth 里手动填 Wharf 的地址。配对后：建站时自动映射端口或登记 443 分流、DDNS 由一方维护、封禁可以同步、告警只收一份、两边互相跳转不用再登录。</p>
             </div>
           </div>
           {data.self_fp && <p className="text-xs text-muted-foreground">Berth 会要求核对 Wharf 的证书指纹（本地 CA）：<span className="font-mono">{fpText(data.self_fp)}</span></p>}
@@ -80,10 +81,11 @@ export function BerthCard() {
             <span>对接已失效（{l.status === 'expired' ? '令牌已过期' : 'Berth 不再接受 Wharf 的令牌'}）。已建好的映射都保留；请解除配对后在 Berth 里重新发起。</span>
           </div>
         )}
+        {!dead && <div className="rounded-lg bg-muted/30 px-3 py-2"><div className="mb-1 text-xs text-muted-foreground">互联状态</div><BerthConn /></div>}
         <div className="grid gap-3 sm:grid-cols-2">
           <Info k="Berth"><a className="text-primary hover:underline" href={l.url} target="_blank" rel="noreferrer">{l.name} · {l.url}</a></Info>
           <Info k="状态"><Dot tone={dead ? 'bad' : l.last_error ? 'warn' : 'ok'} /> {dead ? '对接已失效' : '正常'}{l.last_error && <span className="block text-xs text-muted-foreground">{l.last_error}</span>}</Info>
-          <Info k="证书指纹"><span className="break-all font-mono text-xs">{fpText(l.cert_fp)}</span></Info>
+          <Info k="Berth 本地证书指纹"><span className="break-all font-mono text-xs">{fpText(l.cert_fp)}</span><span className="block text-xs text-muted-foreground">直连时核对它；经公网域名时按域名校验</span></Info>
           <Info k="配对时间">{datetime(l.created_at)}{l.expires_at ? ` · ${datetime(l.expires_at)} 到期` : ' · 永久'}</Info>
           <Info k="最后通信">{l.last_seen_at ? datetime(l.last_seen_at) : '—'}</Info>
           <Info k="由 Berth 管理">{data.forwards ?? 0} 条端口映射 · {data.sni?.domains.length ?? 0} 个 443 域名 · {data.bans ?? 0} 条封禁</Info>

@@ -111,7 +111,9 @@ func (a *App) handleCFZones(w http.ResponseWriter, r *http.Request) {
 		}(i)
 	}
 	wg.Wait()
-	sort.Slice(out, func(i, j int) bool { return len(out[i].UsedBy) > len(out[j].UsedBy) || (len(out[i].UsedBy) == len(out[j].UsedBy) && out[i].Name < out[j].Name) })
+	sort.Slice(out, func(i, j int) bool {
+		return len(out[i].UsedBy) > len(out[j].UsedBy) || (len(out[i].UsedBy) == len(out[j].UsedBy) && out[i].Name < out[j].Name)
+	})
 	writeJSON(w, 200, out)
 }
 

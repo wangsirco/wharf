@@ -18,7 +18,8 @@ Berth 是同一系列的 Linux 服务器管理面板（Wharf 管路由器，Bert
 | Wharf → Berth `/api/ext/wharf/v1/*` | `berth_wrf_…`（Berth 签发） | `X-Wharf` |
 
 ```
-Authorization: Bearer <token>
+<P>-Key:   hex(sha256(token))[:16]        ← 协议 v2（Wharf 0.24.0 起），令牌本身不再发送
+Authorization: Bearer <token>              ← 协议 v1，过渡期仍然接受
 <P>-Ts:    Unix 秒
 <P>-Nonce: 随机串（≤ 64 字符，Wharf 用 24 位十六进制）
 <P>-Sig:   hex( HMAC-SHA256( key, canonical ) )
@@ -32,6 +33,7 @@ canonical = METHOD + "\n" + REQUEST_URI + "\n" + TS + "\n" + NONCE + "\n" + hex(
 - 时间窗 ±60 秒；nonce 在 5 分钟内不能重复（Wharf 存在 `berth_nonce` 表里）。Berth 校验 Wharf 的请求也请这样做。
 - 校验失败时 Wharf 返回 401，记一条访问记录（原因「Berth 接口：…」），并计入限速：15 分钟内 50 次失败后，该 IP 返回 429。
 - Wharf 的接口也经过「面板访问控制」。如果按设备 MAC 限制了内网访问，要把 Berth 主机加进去。
+- **v2 切换**（§8.4）：Wharf 收到带 `X-Berth-Key` 的请求并验签通过后，记下 Berth 已支持 v2，之后 Wharf → Berth 也只发 `X-Wharf-Key`，不再发 `Authorization`。
 
 Go 实现（可直接抄到 Berth）：
 
@@ -45,7 +47,7 @@ func DeriveKey(token string) []byte {
 
 ## 2. 证书
 
-服务器之间互相请求时，用配对时记录的指纹校验对方。Wharf 访问 Berth 时，满足以下任一条件就接受：
+服务器之间互相请求时，用配对时记录的指纹校验对方。Wharf 访问 Berth 的所有请求（ping、封禁、告警、事件、SSO、测延迟）都用同一个规则（`pinOrPublic`），满足以下任一条件就接受：
 
 1. 证书链中任意一张证书（叶子或 CA）的 SHA-256 等于 `berth_fp`；
 2. 证书对访问用的主机名是公共 CA 签发的有效证书。
@@ -56,8 +58,9 @@ Wharf 给 Berth 的 `wharf_fp` 是 Wharf 本地 CA 的指纹，叶子证书续�
 
 1. 用户在 Berth 里填写 Wharf 地址。Berth 生成一次性 `code`，打开：
    ```
-   https://<wharf>/pair/berth?berth_url=<https://berth:port>&berth_fp=<64 位十六进制>&code=<code>&cb=<https://berth:port/...>
+   https://<wharf>/pair/berth?berth_url=<https://berth:port>&berth_urls=<地址1>,<地址2>&berth_fp=<64 位十六进制>&code=<code>&cb=<https://berth:port/...>
    ```
+   - `berth_urls`（v2，可选）：Berth 的全部地址，逗号分隔，内网在前；见 §8.2。
    - `berth_url` 必须是 https；
    - `cb` 必须和 `berth_url` 同主机、同端口。
 2. Wharf 要求超级管理员登录。管理员确认权限范围、有效期（永久 / 30 / 90 / 365 天）和 Berth 主机（按 `berth_url` 的地址自动匹配设备），点「同意配对」。浏览器随后跳到：
@@ -75,7 +78,7 @@ Wharf 给 Berth 的 `wharf_fp` 是 Wharf 本地 CA 的指纹，叶子证书续�
    - 一次性码只能用一次。
 4. Wharf 约 2 秒后调用 Berth 的 `GET /ping`，验证反方向是否通。
 
-**权限范围（scopes）**：`forwards`、`sni`、`ddns`、`devices.read`、`traffic.read`、`bans`、`alerts`、`sso`。
+**权限范围（scopes）**：`forwards`、`sni`、`ddns`、`devices.read`、`traffic.read`、`bans`、`alerts`、`sso`、`dns`（v2，§8.6）。
 
 - Wharf 一侧只能收窄，Berth 会收到 `link.updated` 事件。要增加范围，需要重新配对。
 - `targets` 是允许作为映射目标的 Berth 主机。带 MAC 的目标，换了 DHCP 地址后仍然有效。
@@ -290,3 +293,80 @@ POST /sso/ticket {"berth_user": "wang", "return_to": "/forwards"}
   - `bans.default_sync_to_berth`：`0` 或 `1`；
   - `berth.sni`：Berth 登记的 443 域名。
 - **端口映射**：Berth 建的映射在 `owpfwd.<id>` 里带 `kind=berth`、`berth_ref`、`berth_host`、`berth_link`，在 `owned` 表里的属主是 0。
+
+## 8. 协议 v2（Wharf 0.24.0 起）
+
+Wharf 在 `GET /ping` 的回答里带 `"protocol": 2, "auth": ["key", "bearer"], "key_auth": <是否已切换>`。
+
+### 8.1 配对页的两种地址
+
+「Berth 服务器面板」页（未配对时）给两种地址：
+
+- **同一个局域网（推荐）**：`https://wharf.lan:<端口>`（或路由器 IP），附 Wharf 本地 CA 指纹，Berth 看到的应该一样。
+- **跨网（公网域名）**：「外网访问」里配置的公网名字，注明出示的是公网证书（签发者、到期日），Berth 按域名校验，不用核对指纹。
+
+### 8.2 Berth 的多个地址
+
+- 配对时带 `berth_urls`（逗号分隔或 JSON 数组，最多 8 个，都要 https）。Wharf 再按「私有 IP → `.lan/.local/.home.arpa/.internal` 名字 → 其他」排一次序，存在 `berth_link.urls`。
+- 每次调 Berth：先用上次成功的地址（`berth_link.url`），失败按顺序换下一个，成功后记住。
+- 写操作只在请求还没发出去时（连接、TLS 失败）才换地址，避免同一个改动发两次。
+- 全部失败时，错误里列出每个地址各自的原因。
+- 不依赖 `.local`（路由器一般不解析 mDNS）。
+
+### 8.3 内网发现：「申请 / 允许」
+
+管理员在「Berth 服务器面板」页点「允许 Berth 申请绑定（10 分钟）」，之后：
+
+```
+POST /api/ext/berth/v1/pair/request          （不签名）
+{"code": "<Berth 的一次性码，20–128 位>", "berth_name": "mini",
+ "berth_urls": ["https://192.168.1.20:7090", "https://mini.example.com"],
+ "berth_fp": "<Berth 本地 CA 指纹>", "wharf_fp": "<Berth 看到的 Wharf 本地 CA 指纹>"}
+→ 200 {"id": "<请求 id>", "sas": "123 456", "expires_at": <unix>}
+
+POST /api/ext/berth/v1/pair/request/status   （不签名）
+{"code": "<同上>"}
+→ {"state": "waiting"} | {"state": "refused"} | {"state": "allowed", "code": "<Wharf 的一次性码>", "wharf_url": "https://…"}
+```
+
+- 只接受私有 / 回环 / 链路本地地址来的请求（经隧道、Cloudflare 来的都不算）。`pair/request` 只在开放窗口内回答，窗口外一律 404；`status` 在申请的 10 分钟有效期内都能查。每个来源 10 分钟最多 5 次申请；同时最多 5 个待处理。
+- `wharf_fp` 必须等于 Wharf 本地 CA 指纹，否则 400（中间可能有人换了证书）。
+- **校验码**：`sha256("berth-wharf-sas" + code + berth_fp + wharf_fp)`（直接拼接这几个字符串）取前 8 字节，`[0:4]` 和 `[4:8]` 各按大端 uint32 对 1000 取余，格式 `%03d %03d`。
+- 申请在页面顶部显示（名字、来源 IP、地址、校验码）。管理员点「允许」时勾选范围、Berth 主机（按申请来源自动选好）、有效期，并且**无论用哪种登录方式都要再验证一次身份**（密码或 Passkey）。允许后窗口关闭，其他待处理的申请自动拒绝。
+- `allowed` 时 Berth 用拿到的 `code` 走 §3 的 `POST /pair/exchange`，`wharf_url` 是 Berth 申请时访问 Wharf 用的地址。之后流程不变。
+
+### 8.4 签名不带令牌
+
+- 请求头 `X-Berth-Key: hex(sha256(token))[:16]`（小写），不带 `Authorization`。Wharf 按这个标识找到令牌（`substr(token_hash,1,16)`），验签方式不变。
+- 过渡期两种都收：带了 `X-Berth-Key` 按新方式，否则按旧方式。
+- Wharf 一旦收到 Berth 的 v2 请求就切换（`berth_link.key_auth=1`），之后 Wharf → Berth 只发 `X-Wharf-Key`。Berth 收到 `X-Wharf-Key` 时请按同样方式校验。
+- 配对时的 `pair/exchange` 和轮换令牌时仍然需要传令牌本身（走固定指纹的 TLS）。
+
+### 8.5 互联状态
+
+`GET /api/berth/conn`（超级管理员，面板内部用）：页面每 30 秒取一次；服务端最多 25 秒测一次。
+
+- 先用一个签名的 `GET /ping` 建立连接，再在这条连接上测 3 次，延迟取最小值，抖动取相邻样本差的平均。
+- 对方 IP 取实际连接的远端地址（`httptrace.GotConn`），不用 DNS 结果。
+- 分类：`tailscale`（100.64.0.0/10、`fd7a:115c:a1e0::/48`，先判断）→ `lan`（私有、回环、链路本地）→ `public`。
+- 公网时的 `via`：证书指纹匹配为 `direct`；否则看响应头，`Cf-Ray` 或 `Server: cloudflare` 为 `cloudflare`，`X-Amz-Cf-Id` 为 `cloudfront`，`X-Served-By` / `X-Fastly-Request-Id` 为 `fastly`，其余为 `proxy`。后几种页面会提示加密在代理处解开。
+- 位置只用本地国家库，不把对方 IP 发给任何外部服务。
+
+### 8.6 本地域名（scope `dns`）
+
+```
+GET    /api/ext/berth/v1/dns/names                       → {"items": [{"name": "mini.lan", "ip": "192.168.1.20"}], "suffixes": ["lan"], "max": 5}
+PUT    /api/ext/berth/v1/dns/names/{name}  {"ip": "…"}   → {"ok": true, "name": "mini.lan", "ip": "192.168.1.20"}
+DELETE /api/ext/berth/v1/dns/names/{name}                → {"ok": true}
+```
+
+- 名字只能以 `.lan` 或 dnsmasq 配置的本地域名（`domain`）结尾，每段只能有字母、数字、连字符。
+- IP 必须是 Berth 主机的地址（`targets` 里的，或带 MAC 的目标现在的地址），否则 403。
+- 最多 5 个；和别人登记的「自定义解析」重名时 409。
+- 写进 `/etc/config/dhcp` 的 `domain` 段（段名 `owpb_…`），`owned` 表里 `kind=berth_dns`、属主 0。「DHCP 与 DNS」和「网络工具 → 自定义解析」里标注「由 Berth 登记」，可以手动删除。
+- 记入审计（执行者「Berth（名称）」，可还原）。解除配对时全部删除。
+
+### 8.7 数据（迁移 v23）
+
+- `berth_link.urls`：Berth 的全部地址（JSON 数组）；`berth_link.url` 是上次成功的那个。
+- `berth_link.key_auth`：Berth 是否已改用 `X-Berth-Key`。

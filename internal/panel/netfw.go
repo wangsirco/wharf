@@ -82,7 +82,8 @@ func (a *App) handleNetDHCP(w http.ResponseWriter, r *http.Request) {
 			hosts = append(hosts, map[string]any{"section": sec, "name": sectionStr(s, "name"), "mac": strList(s["mac"]), "ip": sectionStr(s, "ip"),
 				"leasetime": sectionStr(s, "leasetime"), "managed": strings.HasPrefix(sec, "owp")})
 		case "domain":
-			domains = append(domains, map[string]any{"section": sec, "name": sectionStr(s, "name"), "ip": sectionStr(s, "ip"), "managed": strings.HasPrefix(sec, "owp")})
+			domains = append(domains, map[string]any{"section": sec, "name": sectionStr(s, "name"), "ip": sectionStr(s, "ip"), "managed": strings.HasPrefix(sec, "owp"),
+				"berth": a.ownedKind("dhcp", sec) == berthDNSKind})
 		case "dnsmasq":
 			if dnsmasq != nil {
 				continue

@@ -22,7 +22,8 @@ export const loginModeNames: Record<string, string> = { password: '密码或 Pas
 
 // useReauth: someone in a strict mode proves themselves before weakening it, with a passkey
 // where this name has one and the password otherwise. The server enforces it.
-export function useReauth(pk?: PasskeyList | null) {
+// always: ask even someone who signs in with a password (allowing a Berth to pair).
+export function useReauth(pk?: PasskeyList | null, always = false) {
   const { user } = useAuth()
   const [asking, setAsking] = useState(false)
   const [password, setPassword] = useState('')
@@ -30,7 +31,7 @@ export function useReauth(pk?: PasskeyList | null) {
   const pending = useRef<{ ok: () => void; no: (e: Error) => void } | null>(null)
 
   const ensure = async () => {
-    if (user?.login_mode === 'password') return
+    if (user?.login_mode === 'password' && !always) return
     if (pk?.usable && pk.passkeys.some((p) => p.rp_id === pk.here) && passkeySupported()) return verifyPasskey()
     setPassword(''); setError(''); setAsking(true)
     return new Promise<void>((ok, no) => { pending.current = { ok, no } })
@@ -47,7 +48,7 @@ export function useReauth(pk?: PasskeyList | null) {
       <DialogContent className="sm:max-w-sm">
         <DialogTitle>验证身份</DialogTitle>
         <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); submit() }}>
-          <p className="text-sm text-muted-foreground">这个地址上没有你的 Passkey，请输入当前密码继续。</p>
+          <p className="text-sm text-muted-foreground">{always && user?.login_mode === 'password' ? '这一步需要再确认一次是你本人，请输入当前密码。' : '这个地址上没有你的 Passkey，请输入当前密码继续。'}</p>
           <Input autoFocus type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           {error && <ErrorBox>{error}</ErrorBox>}
           <Button type="submit" disabled={!password}>继续</Button>

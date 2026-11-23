@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wangsirco/wharf/internal/sign"
@@ -53,6 +55,9 @@ import (
 
 const berthTokenPrefix = "wharf_bth_"
 
+// berthProtocol: 2 = key-id signing, several Berth addresses, LAN discovery, .lan names.
+const berthProtocol = 2
+
 type berthScope struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
@@ -68,6 +73,7 @@ var berthScopes = []berthScope{
 	{"bans", "封禁同步", "下发或撤回同步过来的封禁；读取 Wharf 里标为可同步的封禁"},
 	{"alerts", "告警转交", "向 Wharf 投递告警，或接收 Wharf 转交的告警"},
 	{"sso", "免登录跳转", "为已设置对应关系的 Berth 用户申请一次性登录票据"},
+	{"dns", "本地域名", "在路由器 DNS 里登记 Berth 的名字（如 mini.lan，只能指向 Berth 主机，最多 5 个），方便用 Passkey"},
 }
 
 func validBerthScope(k string) bool {
@@ -93,6 +99,8 @@ type berthLink struct {
 	LastSeen  int64         `json:"last_seen_at"`
 	Status    string        `json:"status"` // active | expired | invalid (Berth no longer accepts our token)
 	LastError string        `json:"last_error"`
+	URLs      []string      `json:"urls"`     // every address Berth gave, LAN first; URL is the one that last worked
+	KeyAuth   bool          `json:"key_auth"` // sign with a key id, never send the token (both sides ≥ v2)
 
 	tokenHash string
 	signKey   []byte
@@ -166,14 +174,18 @@ func (a *App) berthOpen(enc string) ([]byte, error) {
 
 // ---- storage ----
 
-const berthCols = `id, name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, COALESCE(expires_at,0), created_at, COALESCE(last_seen_at,0), wharf_url, status, last_error`
+const berthCols = `id, name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, COALESCE(expires_at,0), created_at, COALESCE(last_seen_at,0), wharf_url, status, last_error, urls, key_auth`
 
 func (a *App) scanBerth(row interface{ Scan(...any) error }) (*berthLink, error) {
 	var l berthLink
-	var outEnc, keyEnc, scopes, targets string
+	var outEnc, keyEnc, scopes, targets, urls string
 	if err := row.Scan(&l.ID, &l.Name, &l.URL, &l.CertFP, &l.tokenHash, &outEnc, &keyEnc, &scopes, &targets, &l.ExpiresAt, &l.CreatedAt, &l.LastSeen,
-		&l.WharfURL, &l.Status, &l.LastError); err != nil {
+		&l.WharfURL, &l.Status, &l.LastError, &urls, &l.KeyAuth); err != nil {
 		return nil, err
+	}
+	_ = json.Unmarshal([]byte(urls), &l.URLs)
+	if len(l.URLs) == 0 {
+		l.URLs = []string{l.URL}
 	}
 	_ = json.Unmarshal([]byte(scopes), &l.Scopes)
 	_ = json.Unmarshal([]byte(targets), &l.Targets)
@@ -199,6 +211,19 @@ func (a *App) berth() *berthLink {
 		return nil
 	}
 	return l
+}
+
+func (a *App) berthByKeyID(kid string) *berthLink {
+	l, err := a.scanBerth(a.db.QueryRow(`SELECT `+berthCols+` FROM berth_link WHERE substr(token_hash,1,16)=?`, kid))
+	if err != nil {
+		return nil
+	}
+	return l
+}
+
+func validHex(s string) bool {
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 func (a *App) berthByToken(token string) *berthLink {
@@ -266,36 +291,45 @@ func validFP(s string) bool {
 	return err == nil
 }
 
-// pinnedClient trusts a server whose certificate chain contains the pinned SHA-256
-// fingerprint (leaf or CA), or that has a publicly valid certificate for its name.
-func pinnedClient(fp string, timeout time.Duration) *http.Client {
+// pinOrPublic accepts a server whose chain contains the fingerprint taken at pairing (leaf
+// or CA: a direct connection to the peer's own CA, unchanged across renewals), or whose
+// chain is valid for the name dialled under the system roots (a public domain, a reverse
+// proxy, Cloudflare). Who the peer is, is proven by the token and signature, so a valid
+// public certificate is enough. pinned, when given, says which of the two it was.
+func pinOrPublic(fp string, pinned *atomic.Bool) *tls.Config {
 	fp = normFP(fp)
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // replaced by VerifyConnection below
-			MinVersion:         tls.VersionTLS12,
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				for _, c := range cs.PeerCertificates {
-					h := sha256.Sum256(c.Raw)
-					if hex.EncodeToString(h[:]) == fp {
-						return nil
+	return &tls.Config{
+		InsecureSkipVerify: true, // replaced by VerifyConnection below
+		MinVersion:         tls.VersionTLS12,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			for _, c := range cs.PeerCertificates {
+				h := sha256.Sum256(c.Raw)
+				if fp != "" && hex.EncodeToString(h[:]) == fp {
+					if pinned != nil {
+						pinned.Store(true)
 					}
+					return nil
 				}
-				if len(cs.PeerCertificates) > 0 {
-					opts := x509.VerifyOptions{DNSName: cs.ServerName, Intermediates: x509.NewCertPool()}
-					for _, c := range cs.PeerCertificates[1:] {
-						opts.Intermediates.AddCert(c)
-					}
-					if _, err := cs.PeerCertificates[0].Verify(opts); err == nil && cs.ServerName != "" {
-						return nil
-					}
+			}
+			if len(cs.PeerCertificates) > 0 && cs.ServerName != "" {
+				opts := x509.VerifyOptions{DNSName: cs.ServerName, Intermediates: x509.NewCertPool()}
+				for _, c := range cs.PeerCertificates[1:] {
+					opts.Intermediates.AddCert(c)
 				}
-				return errors.New("对方证书与配对时记录的指纹不符")
-			},
+				if _, err := cs.PeerCertificates[0].Verify(opts); err == nil {
+					if pinned != nil {
+						pinned.Store(false)
+					}
+					return nil
+				}
+			}
+			return errors.New("对方证书与配对时记录的指纹不符，也不是这个名字的有效公网证书")
 		},
-		Proxy:                 nil,
-		ResponseHeaderTimeout: timeout,
 	}
+}
+
+func pinnedClient(fp string, timeout time.Duration) *http.Client {
+	tr := &http.Transport{TLSClientConfig: pinOrPublic(fp, nil), Proxy: nil, ResponseHeaderTimeout: timeout}
 	return &http.Client{Timeout: timeout, Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
@@ -325,7 +359,43 @@ func (e *berthHTTPError) Error() string { return e.Msg }
 
 var berthClientHook func(fp string) *http.Client // tests
 
-// berthCall signs and sends a request to Berth's /api/ext/wharf/v1 API.
+// keyID names a pairing token without revealing it: what goes in X-Berth-Key / X-Wharf-Key.
+func keyID(token string) string { return tokenHash(token)[:16] }
+
+// candidates: the address that worked last, then the others in Berth's order (LAN first).
+func (l *berthLink) candidates() []string {
+	out := []string{l.URL}
+	for _, u := range l.URLs {
+		if u != "" && !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// berthRequest builds a signed request to base + /api/ext/wharf/v1 + path. Once Berth signs
+// with a key id itself, Wharf does the same and the token never travels again (it would be
+// readable wherever TLS ends early, e.g. at Cloudflare).
+func berthRequest(ctx context.Context, l *berthLink, base, method, path string, raw []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(base, "/")+"/api/ext/wharf/v1"+path, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	if l.KeyAuth {
+		req.Header.Set("X-Wharf-Key", keyID(l.outToken))
+	} else {
+		req.Header.Set("Authorization", "Bearer "+l.outToken)
+	}
+	if raw != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	sign.SignPrefixed(req, "X-Wharf", sign.DeriveKey(l.outToken), raw)
+	return req, nil
+}
+
+// berthCall signs and sends a request to Berth's /api/ext/wharf/v1 API. It tries the address
+// that worked last and then the others; a change is not sent twice once a request may have
+// reached Berth. The address that answers is remembered.
 func (a *App) berthCall(l *berthLink, method, path string, body, out any) error {
 	if l == nil {
 		return errors.New("尚未与 Berth 配对")
@@ -337,23 +407,50 @@ func (a *App) berthCall(l *berthLink, method, path string, body, out any) error 
 	if body != nil {
 		raw, _ = json.Marshal(body)
 	}
-	req, err := http.NewRequest(method, strings.TrimRight(l.URL, "/")+"/api/ext/wharf/v1"+path, bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+l.outToken)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	sign.SignPrefixed(req, "X-Wharf", sign.DeriveKey(l.outToken), raw)
 	c := pinnedClient(l.CertFP, 15*time.Second)
 	if berthClientHook != nil {
 		c = berthClientHook(l.CertFP)
 	}
-	resp, err := c.Do(req)
-	if err != nil {
-		a.berthNoteError(l, "连接 Berth 失败："+shortErr(err))
-		return fmt.Errorf("连接 Berth 失败：%s", shortErr(err))
+	var resp *http.Response
+	var errs []string
+	tried := 0
+	for _, base := range l.candidates() {
+		var wrote atomic.Bool
+		ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{WroteHeaders: func() { wrote.Store(true) }})
+		req, err := berthRequest(ctx, l, base, method, path, raw)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		tried++
+		resp, err = c.Do(req)
+		if err == nil {
+			if base != l.URL {
+				_, _ = a.db.Exec(`UPDATE berth_link SET url=? WHERE id=?`, base, l.ID)
+				log.Printf("berth: %s unreachable, now using %s", l.URL, base)
+				l.URL = base
+			}
+			break
+		}
+		e := shortErr(err)
+		if strings.Contains(err.Error(), "指纹") {
+			e = "证书与配对时记录的指纹不符"
+		}
+		if len(l.candidates()) > 1 {
+			e = strings.TrimPrefix(base, "https://") + " " + e
+		}
+		errs = append(errs, e)
+		if wrote.Load() && method != "GET" { // it may have arrived; don't repeat a change
+			break
+		}
+	}
+	if resp == nil {
+		msg := "连接 Berth 失败：" + strings.Join(errs, "；")
+		if tried > 1 {
+			msg = fmt.Sprintf("连接 Berth 失败（%d 个地址都试过了）：%s", tried, strings.Join(errs, "；"))
+		}
+		a.berthNoteError(l, msg)
+		return errors.New(msg)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -429,12 +526,24 @@ func (a *App) berthAPI(scope string, h http.HandlerFunc) http.HandlerFunc {
 			a.logBlocked(r, ip, accessResult{reason: "Berth 接口：" + why})
 			jsonErr(w, code, msg)
 		}
-		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !strings.HasPrefix(tok, berthTokenPrefix) {
-			fail(401, "缺少对接令牌", "缺少令牌")
-			return
+		// v2: X-Berth-Key names the token (keyID) and the token itself never travels;
+		// v1: "Authorization: Bearer <token>". Both are accepted during the changeover.
+		var l *berthLink
+		kid := r.Header.Get("X-Berth-Key")
+		if kid != "" {
+			if len(kid) != 16 || !validHex(kid) {
+				fail(401, "对接令牌标识格式不对", "令牌标识格式不对")
+				return
+			}
+			l = a.berthByKeyID(strings.ToLower(kid))
+		} else {
+			tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if !ok || !strings.HasPrefix(tok, berthTokenPrefix) {
+				fail(401, "缺少对接令牌", "缺少令牌")
+				return
+			}
+			l = a.berthByToken(tok)
 		}
-		l := a.berthByToken(tok)
 		if l == nil || l.signKey == nil {
 			fail(401, "对接令牌无效", "令牌无效")
 			return
@@ -471,6 +580,10 @@ func (a *App) berthAPI(scope string, h http.HandlerFunc) http.HandlerFunc {
 		}
 		a.limiter.reset(key)
 		_, _ = a.db.Exec(`UPDATE berth_link SET last_seen_at=? WHERE id=?`, now, l.ID)
+		if kid != "" && !l.KeyAuth { // Berth speaks v2: from now on Wharf stops sending its token too
+			_, _ = a.db.Exec(`UPDATE berth_link SET key_auth=1 WHERE id=?`, l.ID)
+			l.KeyAuth = true
+		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		br := &berthReq{link: l, body: body, actor: clean(r.Header.Get("X-Berth-Actor"), 120)}
 		h(w, r.WithContext(context.WithValue(r.Context(), berthCtxKey{}, br)))
@@ -509,6 +622,7 @@ func (br *berthReq) summary(s string) string {
 
 type berthPending struct {
 	BerthURL string
+	URLs     []string // every address, LAN first (berth_urls)
 	BerthFP  string
 	Scopes   []string
 	Targets  []berthTarget
@@ -532,10 +646,128 @@ func cleanBerthURL(s string) (string, error) {
 	return "https://" + u.Host + strings.TrimRight(u.Path, "/"), nil
 }
 
-// GET /api/berth/pair/preview?berth_url=&berth_fp=&cb=
+// cleanBerthURLs: the berth_urls list (comma separated or a JSON array), with first
+// leading when it is missing. At most 8, all https.
+func cleanBerthURLs(first string, list []string) ([]string, error) {
+	out := []string{}
+	if first != "" {
+		out = append(out, first)
+	}
+	for _, s := range list {
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		u, err := cleanBerthURL(s)
+		if err != nil {
+			return nil, fmt.Errorf("%s：%w", s, err)
+		}
+		if !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	if len(out) > 8 {
+		return nil, errors.New("Berth 地址最多 8 个")
+	}
+	// LAN first (Berth already orders them, but a name given first may be public)
+	slices.SortStableFunc(out, func(x, y string) int { return berthURLRank(x) - berthURLRank(y) })
+	return out, nil
+}
+
+// berthURLRank: 0 private address, 1 .lan/.local/.home.arpa name, 2 anything else.
+func berthURLRank(s string) int {
+	h := urlHost(s)
+	if ip, err := netip.ParseAddr(h); err == nil {
+		if lanAddr(ip) {
+			return 0
+		}
+		return 2
+	}
+	for _, suf := range []string{".lan", ".local", ".home.arpa", ".internal"} {
+		if strings.HasSuffix(strings.ToLower(h), suf) {
+			return 1
+		}
+	}
+	return 2
+}
+
+func urlHost(s string) string {
+	u, err := url.Parse(s)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// lanAddr: private, loopback or link-local (the address class Berth's "内网互联" uses).
+func lanAddr(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+func splitList(s string) []string {
+	if s = strings.TrimSpace(s); s == "" {
+		return nil
+	}
+	if strings.HasPrefix(s, "[") {
+		var l []string
+		if json.Unmarshal([]byte(s), &l) == nil {
+			return l
+		}
+	}
+	return strings.Split(s, ",")
+}
+
+type berthCand struct {
+	berthTarget
+	Online  bool `json:"online"`
+	Matched bool `json:"matched"`
+}
+
+// berthCandidates: devices to choose the Berth host(s) from, the ones at an address Berth
+// is reached at (or that sent the request) first.
+func (a *App) berthCandidates(ctx context.Context, urls []string, extra ...string) ([]berthCand, []string) {
+	ips := slices.Clone(extra)
+	for _, u := range urls {
+		host := urlHost(u)
+		if ip, err := netip.ParseAddr(host); err == nil {
+			ips = append(ips, ip.Unmap().String())
+		} else if berthURLRank(u) < 2 {
+			c, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if addrs, err := net.DefaultResolver.LookupHost(c, host); err == nil {
+				ips = append(ips, addrs...)
+			}
+			cancel()
+		}
+	}
+	var devs []Device
+	_ = a.agent.Do("GET", "/v1/devices", nil, &devs)
+	metas := a.deviceMetas()
+	cands := []berthCand{}
+	for _, d := range devs {
+		if d.IP == "" {
+			continue
+		}
+		id := a.identifyDevice(d.MAC, firstNonEmpty(d.StaticName, d.Hostname), metas[d.MAC].Type)
+		cands = append(cands, berthCand{berthTarget{IP: d.IP, MAC: d.MAC, Name: displayName(metas[d.MAC].Alias, d.StaticName, d.Hostname, id)}, d.Online, slices.Contains(ips, d.IP)})
+	}
+	slices.SortFunc(cands, func(x, y berthCand) int {
+		if x.Matched != y.Matched {
+			return map[bool]int{true: -1, false: 1}[x.Matched]
+		}
+		return strings.Compare(x.Name, y.Name)
+	})
+	return cands, ips
+}
+
+// GET /api/berth/pair/preview?berth_url=&berth_urls=&berth_fp=&cb=
 func (a *App) handleBerthPairPreview(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	bu, err := cleanBerthURL(q.Get("berth_url"))
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	urls, err := cleanBerthURLs(bu, splitList(q.Get("berth_urls")))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
@@ -549,45 +781,9 @@ func (a *App) handleBerthPairPreview(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	// match the Berth host among the devices by its address
-	host := strings.Split(strings.TrimPrefix(bu, "https://"), "/")[0]
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	ips := []string{}
-	if ip, err := netip.ParseAddr(host); err == nil {
-		ips = append(ips, ip.String())
-	} else {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		if addrs, err := net.DefaultResolver.LookupHost(ctx, host); err == nil {
-			ips = addrs
-		}
-		cancel()
-	}
-	var devs []Device
-	_ = a.agent.Do("GET", "/v1/devices", nil, &devs)
-	metas := a.deviceMetas()
-	type cand struct {
-		berthTarget
-		Online  bool `json:"online"`
-		Matched bool `json:"matched"`
-	}
-	cands := []cand{}
-	for _, d := range devs {
-		if d.IP == "" {
-			continue
-		}
-		id := a.identifyDevice(d.MAC, firstNonEmpty(d.StaticName, d.Hostname), metas[d.MAC].Type)
-		cands = append(cands, cand{berthTarget{IP: d.IP, MAC: d.MAC, Name: displayName(metas[d.MAC].Alias, d.StaticName, d.Hostname, id)}, d.Online, slices.Contains(ips, d.IP)})
-	}
-	slices.SortFunc(cands, func(x, y cand) int {
-		if x.Matched != y.Matched {
-			return map[bool]int{true: -1, false: 1}[x.Matched]
-		}
-		return strings.Compare(x.Name, y.Name)
-	})
+	cands, ips := a.berthCandidates(r.Context(), urls)
 	existing := a.berth()
-	writeJSON(w, 200, map[string]any{"berth_url": bu, "berth_fp": fp, "scopes": berthScopes, "devices": cands, "resolved": ips,
+	writeJSON(w, 200, map[string]any{"berth_url": bu, "berth_urls": urls, "berth_fp": fp, "scopes": berthScopes, "devices": cands, "resolved": ips,
 		"paired": existing != nil, "paired_name": func() string {
 			if existing != nil {
 				return existing.Name
@@ -606,22 +802,77 @@ func checkBerthCallback(berthURL, cb string) error {
 	return nil
 }
 
-// POST /api/berth/pair/approve {berth_url, berth_fp, code, cb, scopes, expires_days, targets}
+type berthGrant struct {
+	Scopes      []string      `json:"scopes"`
+	ExpiresDays int           `json:"expires_days"`
+	Targets     []berthTarget `json:"targets"`
+}
+
+// check validates what the super admin agreed to: scopes, Berth hosts, lifetime.
+func (g berthGrant) check() (scopes []string, targets []berthTarget, exp int64, err error) {
+	scopes = []string{}
+	for _, s := range g.Scopes {
+		if !validBerthScope(s) {
+			return nil, nil, 0, errors.New("未知权限 " + s)
+		}
+		if !slices.Contains(scopes, s) {
+			scopes = append(scopes, s)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, nil, 0, errors.New("至少授予一项权限")
+	}
+	if targets, err = cleanTargets(g.Targets); err != nil {
+		return nil, nil, 0, err
+	}
+	if len(targets) == 0 && (slices.Contains(scopes, "forwards") || slices.Contains(scopes, "dns")) {
+		return nil, nil, 0, errors.New("授予「端口映射」或「本地域名」时，至少选择一台 Berth 主机")
+	}
+	switch g.ExpiresDays {
+	case 0:
+	case 30, 90, 365:
+		exp = time.Now().Add(time.Duration(g.ExpiresDays) * 24 * time.Hour).Unix()
+	default:
+		return nil, nil, 0, errors.New("有效期只能是永久、30、90 或 365 天")
+	}
+	return scopes, targets, exp, nil
+}
+
+// berthPend registers a one-time code Berth exchanges for the tokens (pair/exchange).
+func berthPend(p *berthPending) string {
+	code := sign.RandomHex(20)
+	p.until = time.Now().Add(10 * time.Minute)
+	berthPairing.Lock()
+	for k, x := range berthPairing.m {
+		if time.Now().After(x.until) {
+			delete(berthPairing.m, k)
+		}
+	}
+	berthPairing.m[code] = p
+	berthPairing.Unlock()
+	return code
+}
+
+// POST /api/berth/pair/approve {berth_url, berth_urls, berth_fp, code, cb, scopes, expires_days, targets}
 func (a *App) handleBerthPairApprove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BerthURL    string        `json:"berth_url"`
-		BerthFP     string        `json:"berth_fp"`
-		Code        string        `json:"code"`
-		CB          string        `json:"cb"`
-		Scopes      []string      `json:"scopes"`
-		ExpiresDays int           `json:"expires_days"`
-		Targets     []berthTarget `json:"targets"`
+		BerthURL  string   `json:"berth_url"`
+		BerthURLs []string `json:"berth_urls"`
+		BerthFP   string   `json:"berth_fp"`
+		Code      string   `json:"code"`
+		CB        string   `json:"cb"`
+		berthGrant
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
 		return
 	}
 	bu, err := cleanBerthURL(req.BerthURL)
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	urls, err := cleanBerthURLs(bu, req.BerthURLs)
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
@@ -640,52 +891,17 @@ func (a *App) handleBerthPairApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.berth() != nil {
-		jsonErr(w, 409, "已经和一个 Berth 配对；请先在「系统设置 → 集成」里解除配对")
+		jsonErr(w, 409, "已经和一个 Berth 配对；请先在「Berth 服务器面板」页解除配对")
 		return
 	}
-	scopes := []string{}
-	for _, s := range req.Scopes {
-		if !validBerthScope(s) {
-			jsonErr(w, 400, "未知权限 "+s)
-			return
-		}
-		if !slices.Contains(scopes, s) {
-			scopes = append(scopes, s)
-		}
-	}
-	if len(scopes) == 0 {
-		jsonErr(w, 400, "至少授予一项权限")
-		return
-	}
-	targets, err := cleanTargets(req.Targets)
+	scopes, targets, exp, err := req.check()
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	if slices.Contains(scopes, "forwards") && len(targets) == 0 {
-		jsonErr(w, 400, "授予「端口映射」时，至少选择一台 Berth 主机")
-		return
-	}
-	var exp int64
-	switch req.ExpiresDays {
-	case 0:
-	case 30, 90, 365:
-		exp = time.Now().Add(time.Duration(req.ExpiresDays) * 24 * time.Hour).Unix()
-	default:
-		jsonErr(w, 400, "有效期只能是永久、30、90 或 365 天")
-		return
-	}
 	wharfURL := "https://" + r.Host
-	code := sign.RandomHex(20)
-	berthPairing.Lock()
-	for k, p := range berthPairing.m {
-		if time.Now().After(p.until) {
-			delete(berthPairing.m, k)
-		}
-	}
-	berthPairing.m[code] = &berthPending{BerthURL: bu, BerthFP: fp, Scopes: scopes, Targets: targets, Expires: exp, WharfURL: wharfURL,
-		By: currentUser(r), IP: a.clientIP(r), until: time.Now().Add(10 * time.Minute)}
-	berthPairing.Unlock()
+	code := berthPend(&berthPending{BerthURL: urls[0], URLs: urls, BerthFP: fp, Scopes: scopes, Targets: targets, Expires: exp, WharfURL: wharfURL,
+		By: currentUser(r), IP: a.clientIP(r)})
 
 	cb, _ := url.Parse(req.CB)
 	q := cb.Query()
@@ -774,8 +990,12 @@ func (a *App) handleBerthExchange(w http.ResponseWriter, r *http.Request) {
 		exp = p.Expires
 	}
 	now := time.Now().Unix()
-	res, err := a.db.Exec(`INSERT INTO berth_link(name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, expires_at, created_at, last_seen_at, wharf_url)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, name, p.BerthURL, p.BerthFP, tokenHash(token), outEnc, keyEnc, mustJSON(p.Scopes), mustJSON(p.Targets), exp, now, now, p.WharfURL)
+	urls := p.URLs
+	if len(urls) == 0 {
+		urls = []string{p.BerthURL}
+	}
+	res, err := a.db.Exec(`INSERT INTO berth_link(name, url, cert_fp, token_hash, outbound_token_enc, sign_key_enc, scopes, target_devices, expires_at, created_at, last_seen_at, wharf_url, urls)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, name, p.BerthURL, p.BerthFP, tokenHash(token), outEnc, keyEnc, mustJSON(p.Scopes), mustJSON(p.Targets), exp, now, now, p.WharfURL, mustJSON(urls))
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return
@@ -783,7 +1003,7 @@ func (a *App) handleBerthExchange(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	a.limiter.reset(key)
 	a.audit(actor{user: p.By, ip: p.IP}, "berth.pair", "berth", strconv.FormatInt(id, 10),
-		fmt.Sprintf("与 Berth「%s」（%s）配对，授予：%s", name, p.BerthURL, scopeLabels(p.Scopes)), nil, map[string]any{"url": p.BerthURL, "cert_fp": p.BerthFP, "scopes": p.Scopes, "targets": p.Targets}, false)
+		fmt.Sprintf("与 Berth「%s」（%s）配对，授予：%s", name, p.BerthURL, scopeLabels(p.Scopes)), nil, map[string]any{"url": p.BerthURL, "urls": urls, "cert_fp": p.BerthFP, "scopes": p.Scopes, "targets": p.Targets}, false)
 	go func() { // check the way back while Berth is still finishing its side
 		time.Sleep(2 * time.Second)
 		if l := a.berth(); l != nil {
@@ -1012,6 +1232,7 @@ func (a *App) berthUnpair(ac actor, l *berthLink, keep bool) (string, error) {
 		}
 	}
 	a.clearBerthSNI()
+	names := a.dropBerthNames(ac)
 	_, _ = a.db.Exec(`DELETE FROM berth_bans WHERE origin='berth'`)
 	_, _ = a.db.Exec(`UPDATE berth_bans SET sync=0, remote_id=''`)
 	_ = a.syncBerthBans()
@@ -1027,6 +1248,9 @@ func (a *App) berthUnpair(ac actor, l *berthLink, keep bool) (string, error) {
 	}
 	if deleted > 0 {
 		msg += fmt.Sprintf("；删除了 %d 条映射", deleted)
+	}
+	if names > 0 {
+		msg += fmt.Sprintf("；删除了 Berth 登记的 %d 个本地域名", names)
 	}
 	a.audit(ac, "berth.unpair", "berth", strconv.FormatInt(l.ID, 10), msg, map[string]any{"url": l.URL, "scopes": l.Scopes}, nil, false)
 	return msg, nil
@@ -1222,7 +1446,7 @@ func (a *App) handleBerthSSOOut(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 502, err.Error())
 		return
 	}
-	if !strings.HasPrefix(out.URL, strings.TrimRight(l.URL, "/")+"/") {
+	if !slices.ContainsFunc(l.candidates(), func(b string) bool { return strings.HasPrefix(out.URL, strings.TrimRight(b, "/")+"/") }) {
 		jsonErr(w, 502, "Berth 返回的跳转地址不在它自己的地址上")
 		return
 	}
@@ -1262,7 +1486,7 @@ func (a *App) berthHousekeeping() {
 func (a *App) handleBerthPing(w http.ResponseWriter, r *http.Request) {
 	l := berthFrom(r).link
 	writeJSON(w, 200, map[string]any{"ok": true, "name": a.setting("ui.name"), "version": version.Version, "scopes": l.Scopes, "targets": l.Targets,
-		"expires_at": l.ExpiresAt, "time": time.Now().Unix()})
+		"expires_at": l.ExpiresAt, "time": time.Now().Unix(), "protocol": berthProtocol, "auth": []string{"key", "bearer"}, "key_auth": l.KeyAuth})
 }
 
 // POST /api/ext/berth/v1/events {type, …} — Berth tells Wharf about changes on its side.

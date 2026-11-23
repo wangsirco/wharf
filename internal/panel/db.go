@@ -210,6 +210,10 @@ var migrations = []string{
 	// v22: proxy traffic in 5-minute buckets for the last few days ("the last 3 hours"); hours stay in proxy_traffic
 	`CREATE TABLE proxy_traffic_5m (ts INTEGER NOT NULL, user_id INTEGER NOT NULL, node_id INTEGER NOT NULL, up INTEGER NOT NULL, down INTEGER NOT NULL,
 		PRIMARY KEY (ts, user_id, node_id))`,
+	// v23: Berth pairing v2 — every address Berth can be reached at (last good one stays in url),
+	// and whether it signs with a key id instead of sending its token (X-Berth-Key / X-Wharf-Key)
+	`ALTER TABLE berth_link ADD COLUMN urls TEXT NOT NULL DEFAULT '[]';
+	 ALTER TABLE berth_link ADD COLUMN key_auth INTEGER NOT NULL DEFAULT 0`,
 }
 
 func OpenDB(path string) (*sql.DB, error) {

@@ -605,7 +605,17 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 
 ### 6.22 Berth
 
-*Links → Berth*. Before pairing: what Berth (the Linux server panel of the same series) is, where to get it, and pairing in three steps (install Berth, enter Wharf's address in Berth and compare the certificate fingerprint, agree in Wharf). Once paired: open Berth without signing in again, and the pairing's scopes, user mapping and unpairing.
+*Links → Berth*. Before pairing: what Berth (the Linux server panel of the same series) is, where to get it, and pairing in three steps:
+
+1. Install Berth on the server.
+2. Let Berth find the router, either way:
+   - **LAN discovery (easiest):** click *Allow Berth to ask (10 minutes)*, then in Berth *Panel links → LAN discovery → Ask to pair*. The request appears at the top of this page with a six-digit code; when it matches the one Berth shows, *Allow*, pick what it may do and confirm your identity once more — Berth finishes pairing by itself. Only requests from the home LAN are taken; the window closes after 10 minutes.
+   - **Enter the address:** two kinds are offered. On the same LAN, `https://wharf.lan:<port>`; the fingerprint Berth shows should match the one on the page. Across networks, a public name from *Remote access*, which presents a public certificate (e.g. Let's Encrypt): Berth checks it by name and the fingerprint differs, as it should.
+3. Allow it in Wharf (the manual way goes through the approval page).
+
+Once paired: open Berth without signing in, the pairing's scopes, user mapping and unpairing, and the **link status**: LAN / Tailscale (encrypted) / public (direct, through Cloudflare, CloudFront, Fastly or a proxy), latency and jitter measured every 30 s, the peer's address and country (local database only) on public paths, with a note that a CDN or proxy decrypts the traffic. Berth's addresses (LAN IP, `.lan` name, public name) are tried LAN first, switching to the next when one fails. Once both sides speak the new protocol, signed requests carry a token id instead of the token.
+
+New scope *local names*: Berth may register its own names in the router's DNS (e.g. `mini.lan`, pointing only at the Berth hosts, at most 5) for passkeys; they are marked *registered by Berth* on the DHCP / DNS and tools pages, can be deleted by hand and go away with unpairing. Protocol: `docs/BERTH.md` §8.
 
 ### 6.23 Page contents and the setup wizard
 
@@ -619,6 +629,26 @@ Defaults, zones (interfaces, policies, masquerading, MSS clamping, zone-to-zone 
 ### 6.25 Undo
 
 After saving a change that can be restored (settings, users, device details, port forwards, router configuration …) a toast offers *Undo* for 10 seconds. Only the author can undo, within two minutes; older changes are restored by a super admin from the audit log.
+
+### 6.26 The overview's verdict
+
+The overview starts by saying whether things are fine: "一切正常 · 23 devices online · 1.2 GB today", or the most pressing problem with a link — the internet is down, NextDNS is not running (nothing resolves), a network change awaits confirmation, a DDNS update failed, the panel's certificate is about to expire, the Berth link is broken, approvals are waiting, a plugin needs re-importing. When the router sends incomplete data only the affected card shows "no data for now".
+
+### 6.27 Settings tabs and searching settings
+
+- *Settings* has four tabs: general, data sources, remote access & links, updates & maintenance. A dot marks tabs with unsaved changes; *Save* saves them all.
+- Search (⌘K) also finds settings — "Passkey", "attack mode", "DNS cache", "static IP", "version" — and opens the page at that section.
+
+### 6.28 Errors in plain words, retried by themselves
+
+- While the router upgrades or restarts a service, pages say so and retry by themselves (waiting a little longer each time) instead of showing a raw error.
+- Common technical errors are explained with what to do next (storage full, package not in the feeds, download failed, Cloudflare token invalid or missing a permission, name does not resolve, untrusted certificate).
+- A page that cannot be drawn shows *Retry* with the technical details folded away; after a panel update the page reloads once by itself.
+
+### 6.29 On phones
+
+- Tables (visitor log, audit log, NextDNS statistics, traffic, device controls) become cards with labelled fields.
+- A bar at the bottom of the screen: overview, devices, cut off (device controls), refresh DNS, open Berth (search when not paired).
 
 ---
 

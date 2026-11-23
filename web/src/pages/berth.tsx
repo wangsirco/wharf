@@ -10,12 +10,12 @@ import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout'
 import { Pill } from '@/components/common'
 import { BerthCard } from '@/components/berth-card'
+import { BerthDiscovery, PairAddresses } from '@/components/berth-pair'
 import { CopyText } from '@/pages/diag'
 import { Button } from '@/components/ui/button'
 
 const REPO = 'https://github.com/wangsirco/berth'
 const INSTALL = 'curl -fsSL https://raw.githubusercontent.com/wangsirco/berth/main/scripts/install.sh | sudo sh'
-const fpText = (s: string) => s.match(/.{1,4}/g)?.join(' ') ?? s
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -133,15 +133,15 @@ function Intro() {
           <div className="mt-2"><CopyText text={INSTALL} /></div>
           <p className="mt-2 text-xs text-muted-foreground">目前支持 ARM64（Apple M 系列 Mac、树莓派、ARM 云服务器），x86 版本在开发中。系统：Fedora、Debian、Ubuntu、Rocky / Alma，内存 1 GB 以上。</p>
         </Step>
-        <Step n={2} title="在 Berth 里填上这个面板的地址">
-          <p className="text-xs text-muted-foreground">打开 Berth 左侧的「Wharf」，点「配对」，填：</p>
-          <div className="mt-2"><CopyText text={location.origin} /></div>
-          {info?.self_fp && (
-            <p className="mt-2 text-xs text-muted-foreground">Berth 会显示它读到的证书指纹，和下面这串一致再继续，以后通信就不会被冒充：<br /><span className="font-mono text-foreground">{fpText(info.self_fp)}</span></p>
-          )}
+        <Step n={2} title="在 Berth 里找到这台路由器">
+          {isSuper ? <>
+            <BerthDiscovery />
+            <p className="mb-2 mt-3 text-xs text-muted-foreground">或者手动：打开 Berth 左侧的「Wharf」，点「配对」，填其中一个地址：</p>
+            <PairAddresses selfFP={info?.self_fp} />
+          </> : <p className="text-xs text-muted-foreground">需要超级管理员来操作。</p>}
         </Step>
-        <Step n={3} title="回到这里点同意" last>
-          <p className="text-xs text-muted-foreground">Berth 会把你带回 Wharf，列出它想做的事（端口映射、封禁同步、告警等），按需勾选后同意，就会自动回到 Berth。之后这一页会变成 Berth 的入口。{!isSuper && '（需要超级管理员来同意）'}</p>
+        <Step n={3} title="在这里允许" last>
+          <p className="text-xs text-muted-foreground">用内网发现时，申请会出现在上面，核对两边的校验码后点「允许」，Berth 自动完成配对。手动填地址时，Berth 会把你带回 Wharf 的授权页，勾选后同意即可。之后这一页会变成 Berth 的入口。</p>
         </Step>
       </section>
       <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck className="size-3.5" />配对后每一次调用都签名校验，所有改动记入审计，可以随时解除。</p>

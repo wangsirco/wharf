@@ -497,6 +497,11 @@ func (a *App) panelNamesState(withDNS bool) map[string]any {
 	}
 	if pubCert.cert != nil {
 		out["cert_expires"] = pubCert.exp.Unix()
+		if len(pubCert.cert.Certificate) > 0 {
+			if c, err := x509.ParseCertificate(pubCert.cert.Certificate[0]); err == nil {
+				out["cert_issuer"] = firstNonEmpty(c.Issuer.CommonName, strings.Join(c.Issuer.Organization, " "))
+			}
+		}
 	}
 	return out
 }

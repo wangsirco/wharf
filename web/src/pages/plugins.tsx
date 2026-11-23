@@ -106,17 +106,19 @@ function PluginCard({ p, onImport }: { p: PluginItem; onImport?: () => void }) {
         <span className="flex items-center gap-1.5 text-xs"><Dot tone={tone} />{st}</span>
       </div>
       {(p.about || p.desc) && <p className="line-clamp-2 text-sm text-muted-foreground">{p.about || p.desc}</p>}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex items-end gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {p.group_label && <Pill>{p.group_label}</Pill>}
         {!p.group_label && <Pill>{catLabel[p.category] ?? p.category}</Pill>}
-        {(p.ports ?? []).filter((x) => !x.local).slice(0, 4).map((x) => <Pill key={x.port + x.proto} tone={x.wan_open ? 'amber' : 'blue'}>{x.port}/{x.proto}{x.wan_open ? ' 外网可访问' : ''}</Pill>)}
+        {(p.ports ?? []).filter((x) => !x.local).slice(0, 3).map((x) => <Pill key={x.port + x.proto} tone={x.wan_open ? 'amber' : 'blue'}>{x.port}/{x.proto}{x.wan_open ? ' 外网可访问' : ''}</Pill>)}
+        {(p.ports ?? []).filter((x) => !x.local).length > 3 && <Pill>另 {(p.ports ?? []).filter((x) => !x.local).length - 3} 个端口</Pill>}
         {p.covered && <Pill tone="green">Wharf 已自带</Pill>}
         {!!p.warnings?.length && <Pill tone="amber">{p.warnings.length} 个提醒</Pill>}
         {p.by_wharf && <Pill>经 Wharf 安装</Pill>}
         {p.imported && p.imported.version !== p.version && <Pill tone="amber">插件已升级，需重新导入</Pill>}
         {!p.imported && pages > 0 && <Pill>{pages} 个设置页</Pill>}
-        <span className="flex-1" />
-        {onImport && <Button size="xs" variant="outline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onImport() }}><Puzzle /> 导入</Button>}
+      </div>
+        {onImport && <Button size="xs" variant="outline" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onImport() }}><Puzzle /> 导入</Button>}
       </div>
     </Link>
   )

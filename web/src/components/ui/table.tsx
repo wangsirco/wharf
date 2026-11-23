@@ -3,15 +3,35 @@
 import * as React from "react"
 import { cn } from "cn"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+// cards: on phones each row becomes a small card, every cell labelled with its column's
+// header (copied from <thead> automatically), instead of scrolling sideways.
+function Table({ className, cards, ...props }: React.ComponentProps<"table"> & { cards?: boolean }) {
+  const ref = React.useRef<HTMLTableElement>(null)
+  React.useEffect(() => {
+    const t = ref.current
+    if (!cards || !t) return
+    const label = () => {
+      const heads = [...t.querySelectorAll("thead th")].map((th) => th.textContent?.trim() ?? "")
+      t.querySelectorAll("tbody tr").forEach((tr) =>
+        [...tr.children].forEach((td, i) => {
+          if (heads[i] && td.getAttribute("data-label") !== heads[i]) td.setAttribute("data-label", heads[i])
+        }),
+      )
+    }
+    label()
+    const mo = new MutationObserver(label)
+    mo.observe(t, { childList: true, subtree: true })
+    return () => mo.disconnect()
+  }, [cards])
   return (
     <div
       data-slot="table-container"
       className="relative w-full overflow-x-auto"
     >
       <table
+        ref={ref}
         data-slot="table"
-        className={cn("w-full caption-bottom text-sm", className)}
+        className={cn("w-full caption-bottom text-sm", cards && "owp-cards", className)}
         {...props}
       />
     </div>

@@ -24,7 +24,7 @@ interface DnsCfg {
 }
 interface Lease { hostname?: string; ipaddr?: string; macaddr?: string; expires?: number }
 interface DhcpResp {
-  pools: Pool[] | null; hosts: Host[] | null; domains: { section: string; name: string; ip: string; managed: boolean }[] | null; dnsmasq: DnsCfg | null
+  pools: Pool[] | null; hosts: Host[] | null; domains: { section: string; name: string; ip: string; managed: boolean; berth?: boolean }[] | null; dnsmasq: DnsCfg | null
   leases: { dhcp_leases?: Lease[] } | null; interfaces: string[]
 }
 
@@ -147,7 +147,7 @@ export default function DHCPPage() {
             {data.domains.map((d) => (
               <div key={d.section} className="flex items-center gap-4 px-4 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate font-mono">{d.name}</span><span className="font-mono text-muted-foreground">{d.ip}</span>
-                {d.managed && <Pill tone="blue">Wharf</Pill>}
+                {d.berth ? <Pill tone="blue">由 Berth 登记</Pill> : d.managed && <Pill tone="blue">Wharf</Pill>}
               </div>
             ))}
           </div>

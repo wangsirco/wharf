@@ -346,6 +346,7 @@ type customHost struct {
 	IP       string `json:"ip"`
 	OwnerID  int64  `json:"owner_id,omitempty"`
 	Editable bool   `json:"editable"`
+	Berth    bool   `json:"berth,omitempty"` // registered by the paired Berth (berth_v2.go)
 }
 
 // GET /api/hosts
@@ -363,6 +364,7 @@ func (a *App) handleHosts(w http.ResponseWriter, r *http.Request) {
 		}
 		h := customHost{Section: name, Name: optStr(s, "name"), IP: optStr(s, "ip"), OwnerID: a.owner("dhcp", name)}
 		h.Editable = u.Can("system.manage") && a.canTouch(u, "dhcp", name)
+		h.Berth = a.ownedKind("dhcp", name) == berthDNSKind
 		list = append(list, h)
 	}
 	writeJSON(w, 200, list)

@@ -1,5 +1,14 @@
 # Changelog · 更新日志
 
+## 0.24.0 — Berth pairing v2, verdict line, settings tabs, phones · Berth 互联 v2、一句话结论、设置分类、手机
+
+- Berth pairing v2 (docs/BERTH.md §8): LAN discovery — Berth asks, the admin allows here after comparing a six-digit code (LAN sources only, a 10-minute window, identity confirmed again); the pairing page explains the LAN address with Wharf's fingerprint and public names with their public certificate; several Berth addresses, LAN first, switched automatically when one fails; signed requests carry a token id instead of the token once Berth supports it; link status with LAN / Tailscale / public (direct, Cloudflare, CloudFront, Fastly, proxy), latency, jitter, peer address and country; new scope to register `.lan` names for Berth in the router's DNS · Berth 互联 v2：内网发现绑定、两种证书说明、多地址自动切换、签名不带令牌、互联状态、登记 .lan 名字
+- Overview starts with a verdict: all fine, or the most pressing problem (internet down, NextDNS not running, DDNS failing, certificate expiring, approvals, Berth link, plugins to re-import) with a link · 概览一句话结论
+- Settings in four tabs; search finds settings and opens the section · 系统设置分 4 个标签，搜索能直接搜到设置项
+- Errors in plain words with the next step; a router that is busy restarting is retried automatically · 出错说人话并自动重试
+- Phones: tables become cards; a bottom bar with overview, devices, cut off, refresh DNS, Berth · 手机上表格变卡片，底部常用操作栏
+- Fixes: the overview no longer fails as a whole when the router leaves fields out; the plugin card's import button no longer wraps · 修复概览在数据不全时整页报错、插件卡片「导入」按钮换行
+
 ## 0.23.0 — Remote access in one place, menu groups, undo · 外网访问、菜单分组、撤销
 
 - Remote access page: how the panel is reachable from outside right now, the three ways (Cloudflare Tunnel / orange cloud / direct) with the one that suits the line (from the public address check), the panel's names, and who may come in (access control, Cloudflare Access). Panel names moved here from Settings · 外网访问页

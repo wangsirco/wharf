@@ -63,7 +63,7 @@ export function Welcome() {
   const reachNext: Record<Reach, [typeof Cloud, string, string, string] | null> = {
     home: null,
     tunnel: [Waypoints, '用 Cloudflare 隧道从外面打开', '不开端口、不需要公网 IP：连上 Cloudflare，点「接到隧道上」', '/cloudflare?tab=tunnel'],
-    public: [Earth, '给面板一个公网域名', '有公网 IP：域名 + 证书，橙色云或直连都行', '/settings#sec-' + encodeURIComponent('面板域名（公网访问与 Passkey）').replace(/%/g, '').slice(0, 40)],
+    public: [Earth, '给面板一个公网域名', '有公网 IP：域名 + 证书，橙色云或直连都行', '/remote#panel-names'],
   }
   const next = ([
     reachNext[reach],

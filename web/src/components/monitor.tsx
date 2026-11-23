@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowDown, ArrowUp, Ban, Bell, ClipboardCheck, Globe2, House, Info, LogOut, MonitorSmartphone, ShieldAlert, Sparkles, Wifi, WifiOff } from 'lucide-react'
 import { get } from '@/lib/api'
@@ -26,8 +26,20 @@ export function Kpi({ icon: Icon, label, value, sub, tone, onClick, big }: {
 }
 
 // WAN live rate history from /system counters.
+// The router may leave fields out (an older agent, a model without conntrack): fill them
+// so one missing number shows as 0 instead of taking the whole page down.
+const SYS0: SystemInfo = { hostname: '', release: '', kernel: '', model: '', firewall: '', uptime: 0, load: [0, 0, 0], mem_total: 0, mem_available: 0,
+  conntrack: 0, conntrack_max: 0, wan_ifname: '', lan_ifname: '', ifaces: [], time: 0 }
+function fillSys(raw: Partial<SystemInfo>): SystemInfo {
+  const s = { ...SYS0, ...Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null && v !== undefined)) } as SystemInfo
+  if (!Array.isArray(s.load) || s.load.length < 3) s.load = [...(Array.isArray(s.load) ? s.load : []), 0, 0, 0].slice(0, 3)
+  if (!Array.isArray(s.ifaces)) s.ifaces = []
+  return s
+}
+
 export function useWan(poll = 2000) {
-  const { data: sys } = useApi<SystemInfo>('/system', poll)
+  const { data: raw } = useApi<SystemInfo>('/system', poll)
+  const sys = useMemo(() => (raw ? fillSys(raw) : null), [raw])
   const prev = useRef<SystemInfo | null>(null)
   const [hist, setHist] = useState<{ t: number[]; rx: number[]; tx: number[] }>({ t: [], rx: [], tx: [] })
   const [rate, setRate] = useState({ rx: 0, tx: 0 })

@@ -49,9 +49,9 @@ func TestProxyUsage(t *testing.T) {
 	h := now / 3600 * 3600
 	mustExec(`INSERT INTO proxy_traffic VALUES(?, 1, 1, 100, 1000)`, h-5*86400)
 	mustExec(`INSERT INTO proxy_traffic VALUES(?, 2, 1, 10, 20)`, h-3600)
-	mustExec(`INSERT INTO proxy_traffic VALUES(?, 9, 1, 1, 2)`, h-3600)  // deleted user
-	mustExec(`INSERT INTO proxy_traffic VALUES(?, 3, 1, 5, 5)`, h-3600)  // someone else's user on node 1
-	mustExec(`INSERT INTO proxy_traffic VALUES(?, 3, 2, 7, 7)`, h-7200)  // someone else's node
+	mustExec(`INSERT INTO proxy_traffic VALUES(?, 9, 1, 1, 2)`, h-3600) // deleted user
+	mustExec(`INSERT INTO proxy_traffic VALUES(?, 3, 1, 5, 5)`, h-3600) // someone else's user on node 1
+	mustExec(`INSERT INTO proxy_traffic VALUES(?, 3, 2, 7, 7)`, h-7200) // someone else's node
 
 	get := func(u *User, q string) usageResp {
 		r := httptest.NewRequest("GET", "/api/proxy/usage?"+q, nil)
@@ -102,4 +102,3 @@ func TestProxyUsage(t *testing.T) {
 		t.Fatalf("user: %+v", r)
 	}
 }
-

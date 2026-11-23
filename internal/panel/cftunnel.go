@@ -91,7 +91,9 @@ func (a *App) ServeTunnel(h http.Handler) {
 	_ = os.Chmod(tunnelSocket, 0o600)
 	srv := &http.Server{
 		Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second,
-		ConnContext: func(ctx context.Context, _ net.Conn) context.Context { return context.WithValue(ctx, tunnelCtxKey{}, true) },
+		ConnContext: func(ctx context.Context, _ net.Conn) context.Context {
+			return context.WithValue(ctx, tunnelCtxKey{}, true)
+		},
 	}
 	_ = srv.Serve(ln)
 }
@@ -483,4 +485,3 @@ func slicesContains(l []string, s string) bool {
 	}
 	return false
 }
-

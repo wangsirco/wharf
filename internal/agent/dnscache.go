@@ -469,8 +469,10 @@ func DNSTraceName(name, typ string) (*DNSTrace, error) {
 	return t, nil
 }
 
-func answered(l DNSLayer) bool { return l.Error == "" && l.Status != "" && l.Status != "SERVFAIL" && l.Status != "REFUSED" }
-func hasData(l DNSLayer) bool  { return len(l.Records) > 0 }
+func answered(l DNSLayer) bool {
+	return l.Error == "" && l.Status != "" && l.Status != "SERVFAIL" && l.Status != "REFUSED"
+}
+func hasData(l DNSLayer) bool { return len(l.Records) > 0 }
 
 func blockedAddr(a string) bool { return a == "0.0.0.0" || a == "::" }
 

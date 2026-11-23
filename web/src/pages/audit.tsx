@@ -54,7 +54,7 @@ export default function Audit() {
           </div>
         </div>
       }>
-        <Table>
+        <Table cards>
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">时间</TableHead><TableHead>管理员</TableHead><TableHead>操作</TableHead>

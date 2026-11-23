@@ -47,7 +47,7 @@ export default function Traffic() {
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
         <Section title="设备排行" desc="条形：蓝色为下载，绿色为上传">
-          <Table>
+          <Table cards>
             <TableHeader><TableRow>
               <TableHead className="pl-4">设备</TableHead><TableHead className="w-[28%]">用量</TableHead>
               <TableHead className="text-right">下载</TableHead><TableHead className="text-right">上传</TableHead><TableHead className="pr-4 text-right">最近活动</TableHead>

@@ -161,15 +161,15 @@ func cfAccountOf(token string) (*cfAccountInfo, error) {
 // ---- what the token can do ----
 
 type cfCaps struct {
-	Account   *cfAccountInfo  `json:"account,omitempty"`
-	Zones     bool            `json:"zones"`
-	DNS       bool            `json:"dns"`
-	Tunnel    bool            `json:"tunnel"`
-	Access    string          `json:"access"` // ok | denied | not_enabled (Zero Trust not set up)
-	Settings  bool            `json:"settings"`
-	Analytics bool            `json:"analytics"`
+	Account   *cfAccountInfo    `json:"account,omitempty"`
+	Zones     bool              `json:"zones"`
+	DNS       bool              `json:"dns"`
+	Tunnel    bool              `json:"tunnel"`
+	Access    string            `json:"access"` // ok | denied | not_enabled (Zero Trust not set up)
+	Settings  bool              `json:"settings"`
+	Analytics bool              `json:"analytics"`
 	Errors    map[string]string `json:"errors,omitempty"`
-	Checked   int64           `json:"checked"`
+	Checked   int64             `json:"checked"`
 }
 
 var cfCapsCache struct {

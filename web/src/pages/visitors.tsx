@@ -59,7 +59,7 @@ export default function Visitors() {
           </div>
         </div>
       }>
-        <Table>
+        <Table cards>
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">访问时间</TableHead><TableHead>用户本机时间</TableHead><TableHead>代理判断</TableHead>

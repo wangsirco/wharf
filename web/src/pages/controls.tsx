@@ -22,7 +22,7 @@ export default function Controls() {
       <PageHeader title="设备管控" desc="断网、黑白名单、定时断网、禁止访问路由器端口。在「设备」里点开任意设备 →「访问控制」即可添加规则。" />
       {error && <div className="mb-4"><ErrorBox>{error}</ErrorBox></div>}
       <Section title="已设置管控的设备">
-        <Table>
+        <Table cards>
           <TableHeader><TableRow>
             <TableHead className="pl-4">设备</TableHead><TableHead>状态</TableHead><TableHead>名单</TableHead><TableHead>定时</TableHead>
             <TableHead>设置者</TableHead><TableHead className="pr-4 text-right">断网</TableHead>

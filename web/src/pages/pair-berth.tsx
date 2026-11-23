@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 interface Scope { key: string; label: string; desc: string }
 interface Cand { ip: string; mac?: string; name?: string; online: boolean; matched: boolean }
-interface Preview { berth_url: string; berth_fp: string; scopes: Scope[]; devices: Cand[]; resolved: string[]; paired: boolean; paired_name: string }
+interface Preview { berth_url: string; berth_urls: string[]; berth_fp: string; scopes: Scope[]; devices: Cand[]; resolved: string[]; paired: boolean; paired_name: string }
 
 // /pair/berth?berth_url=&berth_fp=&code=&cb= — Berth sends the super admin here to agree.
 export default function PairBerth() {
@@ -23,7 +23,7 @@ export default function PairBerth() {
   const [days, setDays] = useState(0)
   const [hosts, setHosts] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const qs = new URLSearchParams({ berth_url: q.get('berth_url') ?? '', berth_fp: q.get('berth_fp') ?? '', cb: q.get('cb') ?? '' })
+  const qs = new URLSearchParams({ berth_url: q.get('berth_url') ?? '', berth_urls: q.get('berth_urls') ?? '', berth_fp: q.get('berth_fp') ?? '', cb: q.get('cb') ?? '' })
 
   useEffect(() => {
     get<Preview>('/berth/pair/preview?' + qs.toString())
@@ -37,7 +37,7 @@ export default function PairBerth() {
     try {
       const targets = p.devices.filter((d) => hosts.includes(d.ip)).map(({ ip, mac, name }) => ({ ip, mac, name }))
       const r = await post<{ redirect: string }>('/berth/pair/approve', {
-        berth_url: p.berth_url, berth_fp: p.berth_fp, code: q.get('code') ?? '', cb: q.get('cb') ?? '', scopes, expires_days: days, targets,
+        berth_url: p.berth_url, berth_urls: p.berth_urls, berth_fp: p.berth_fp, code: q.get('code') ?? '', cb: q.get('cb') ?? '', scopes, expires_days: days, targets,
       })
       window.location.href = r.redirect
     } catch (e) { toast.error((e as Error).message); setBusy(false) }
@@ -48,7 +48,7 @@ export default function PairBerth() {
     <div className="mx-auto grid max-w-3xl gap-4">
       <PageHeader title="与 Berth 配对" desc="Berth 是同一系列的服务器管理面板。配对后，两边可以互相调用：映射端口、协调 DDNS、同步封禁、免登录跳转。所有经它做的改动都会记入审计。" />
       {err && <ErrorBox>{err}</ErrorBox>}
-      {p && p.paired && <ErrorBox>Wharf 已经和 Berth「{p.paired_name}」配对。要换一个 Berth，请先在「系统设置 → 集成」里解除配对。</ErrorBox>}
+      {p && p.paired && <ErrorBox>Wharf 已经和 Berth「{p.paired_name}」配对。要换一个 Berth，请先在「Berth 服务器面板」页解除配对。</ErrorBox>}
       {p && !p.paired && (
         <>
           <Section title="谁在请求配对">
@@ -60,7 +60,8 @@ export default function PairBerth() {
                   <div className="truncate font-mono text-xs text-muted-foreground" title={p.berth_fp}>证书指纹 SHA-256 {p.berth_fp.match(/.{1,4}/g)?.join(' ')}</div>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">请和 Berth「设置 → 集成 → Wharf」里显示的指纹核对。之后 Wharf 访问 Berth 时都会校验这个指纹。</p>
+              {p.berth_urls.length > 1 && <p className="text-xs text-muted-foreground">Wharf 回连 Berth 的地址（内网优先，连不上自动换下一个）：<span className="font-mono">{p.berth_urls.join(' · ')}</span></p>}
+              <p className="text-xs text-muted-foreground">请和 Berth 配对页上显示的指纹核对。Wharf 直连 Berth 时校验这个指纹；经公网域名访问时，按域名校验公网证书。</p>
             </div>
           </Section>
 

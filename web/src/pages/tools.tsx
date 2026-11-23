@@ -21,7 +21,7 @@ import { Monitors } from '@/pages/monitor'
 import { CaptureTool } from '@/pages/capture'
 
 interface UPnPRule { num: string; proto: string; extport: number; intaddr: string; intport: number; descr: string; expires: number; device: string; mac: string }
-interface Host { section: string; name: string; ip: string; editable: boolean }
+interface Host { section: string; name: string; ip: string; editable: boolean; berth?: boolean }
 
 const TABS: [string, string, (can: (p: string) => boolean) => boolean][] = [
   ['trace', '路由追踪', (c) => c('tools.diag')],
@@ -167,7 +167,7 @@ function Hosts() {
         <div className="divide-y">
           {list.map((h) => (
             <div key={h.section} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium">{h.name}</span>
+              <span className="min-w-0 flex-1 truncate font-medium">{h.name}{h.berth && <span className="ml-2"><Pill tone="blue">由 Berth 登记</Pill></span>}</span>
               <span className="font-mono text-xs text-muted-foreground">{h.ip}</span>
               <div className={cn('flex', !h.editable && 'invisible')}>
                 <Button variant="ghost" size="icon-sm" title="修改" onClick={() => setEdit({ section: h.section, name: h.name, ip: h.ip })}><Pencil /></Button>

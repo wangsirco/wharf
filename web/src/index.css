@@ -146,3 +146,17 @@
 /* dual-thumb range slider: only the thumbs receive pointer events */
 .range-thumb::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 16px; height: 16px; border-radius: 9999px; background: var(--background); border: 2px solid var(--primary); cursor: grab; }
 .range-thumb::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 9999px; background: var(--background); border: 2px solid var(--primary); cursor: grab; }
+
+/* a section reached from search or a link: a short highlight so the eye finds it */
+@keyframes toc-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--color-primary); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.toc-flash { animation: toc-flash 1.6s ease-out; border-radius: var(--radius-xl, 0.75rem); }
+
+/* <Table cards>: rows as cards on phones (components/ui/table.tsx) */
+@media (max-width: 767px) {
+  .owp-cards thead { display: none; }
+  .owp-cards, .owp-cards tbody { display: block; }
+  .owp-cards tr { display: grid; gap: 0.25rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); }
+  .owp-cards td:not(.hidden) { display: flex; align-items: baseline; gap: 0.75rem; padding: 0 !important; max-width: none; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+  .owp-cards td[data-label]::before { content: attr(data-label); flex: 0 0 5.5rem; color: var(--muted-foreground); font-size: 0.75rem; }
+  .owp-cards td:empty { display: none; }
+}
