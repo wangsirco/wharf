@@ -1,13 +1,14 @@
+import { cn } from '@/lib/utils'
+import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import { KeyRound, Plus, Trash2 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, post } from '@/lib/api'
 import { useApi } from '@/lib/hooks'
 import { addPasskey, defaultPasskeyName, passkeySupported } from '@/lib/passkey'
 import { LoginMode, panelURL, useReauth, type PasskeyList } from '@/components/login-mode'
 import { ago, datetime } from '@/lib/format'
 import { Empty } from '@/components/common'
 import { toast } from 'sonner'
-import { post } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { PageHeader } from '@/components/layout'
 import { Field, Section } from '@/components/common'
@@ -50,6 +51,15 @@ function Passkeys({ data, reload }: { data?: PasskeyList | null; reload: () => v
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const url = (h: string) => panelURL(h, data?.port ?? '', '/account')
+  const [sp] = useSearchParams()
+  const wantAdd = sp.get('passkey') === 'add'
+  // names of the panel this account has no passkey on yet: carry the sign-in there
+  const missing = (data?.hosts ?? []).filter((h) => h !== data?.here && !data?.passkeys.some((p) => p.rp_id === h))
+  const hop = async (h: string) => {
+    const w = window.open('about:blank', '_blank')
+    try { const r = await post<{ url: string }>('/me/hop', { to: h, path: '/account?passkey=add' }); if (w) w.location.href = r.url; else location.href = r.url }
+    catch (e) { w?.close(); toast.error((e as Error).message) }
+  }
   const add = async () => {
     setBusy(true)
     try { await ensure(); await addPasskey(name || defaultPasskeyName()); setName(''); toast.success('Passkey 已添加，下次可以直接用它登录'); reload() }
@@ -59,7 +69,10 @@ function Passkeys({ data, reload }: { data?: PasskeyList | null; reload: () => v
     try { await ensure(); await api('DELETE', `/me/passkeys/${id}`); toast.success('已删除'); reload() } catch (e) { if ((e as Error).message !== '已取消') toast.error((e as Error).message) }
   }
   return (
-    <Section title="Passkey" desc="用 Face ID、指纹或安全密钥确认身份。每台设备 / 每个密码管理器可以各添加一个。" className="mt-4 max-w-2xl">
+    <Section title="Passkey" desc="用 Face ID、指纹或安全密钥确认身份。每台设备 / 每个密码管理器可以各添加一个。Passkey 跟着名字走：在哪个地址添加，就只能在哪个地址用。" className={cn('mt-4 max-w-2xl', wantAdd && 'ring-2 ring-primary')}>
+      {wantAdd && data?.usable && !data.passkeys.some((p) => p.rp_id === data.here) && (
+        <p className="border-b bg-accent/40 px-4 py-2 text-sm">在 <b className="font-mono">{data.here}</b> 上添加一个 Passkey：在下面起个名字，点「添加 Passkey」。</p>
+      )}
       <div className="divide-y">
         {data?.passkeys.map((p) => (
           <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
@@ -89,6 +102,17 @@ function Passkeys({ data, reload }: { data?: PasskeyList | null; reload: () => v
           </div>
         )}
       </div>
+      {missing.length > 0 && (data?.passkeys.length ?? 0) > 0 && (
+        <div className="grid gap-1.5 border-t p-4">
+          <div className="text-xs text-muted-foreground">这些地址上还没有你的 Passkey：</div>
+          {missing.map((h) => (
+            <div key={h} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate font-mono">{h}</span>
+              <Button size="xs" variant="outline" onClick={() => hop(h)}>去 {h} 添加</Button>
+            </div>
+          ))}
+        </div>
+      )}
       {dialog}
     </Section>
   )

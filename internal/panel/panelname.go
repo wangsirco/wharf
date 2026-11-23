@@ -597,6 +597,7 @@ func (a *App) handlePanelNamesSave(w http.ResponseWriter, r *http.Request) {
 	go a.renewPublicCert(!slices.Equal(old, ns))
 	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "setting.update", "setting", "panel.public_names",
 		fmt.Sprintf("面板公网域名：%s（443：%v，独立端口：%v）", firstNonEmpty(strings.Join(ns, "、"), "无"), req.Via443, req.ViaPort), old, ns, false)
+	go a.berthNotifyNames()            // the public name may have changed (Berth v3 names.changed)
 	time.Sleep(300 * time.Millisecond) // let the renewal mark itself busy
 	writeJSON(w, 200, a.panelNamesState(false))
 }

@@ -286,7 +286,7 @@ func (a *App) handleCFAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []cfAccessApp{}
 	for _, x := range apps {
-		if x.Type != "self_hosted" {
+		if x.Type != "self_hosted" || (isBypassApp(x) && strings.HasPrefix(x.Name, accessPrefix)) {
 			continue
 		}
 		x.Mine = strings.HasPrefix(x.Name, accessPrefix)
@@ -323,6 +323,126 @@ func accessEmails(tok, acc, app string) []string {
 
 var emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$|^@[^@\s]+\.[^@\s]+$`)
 
+// accessBypassPath: the other panel's server-to-server calls. They carry their own
+// signature (X-Berth-Key), and Access would answer them with a redirect to its sign-in
+// page, so a name Wharf protects with Access lets this path through (a more specific
+// path wins in Access).
+const accessBypassPath = "/api/ext/berth/"
+
+func isBypassApp(x cfAccessApp) bool { return strings.Contains(x.Domain, accessBypassPath) }
+
+// saveAccess protects host with an email code (Wharf's own app, created or updated) and
+// lets Berth's calls through with a Bypass app on accessBypassPath.
+func (a *App) saveAccess(tok, host string, emails []string, hours int) ([]string, error) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if !fqdnRe.MatchString(host) {
+		return nil, &httpErr{code: 400, msg: "名字不对"}
+	}
+	var include []map[string]any
+	var clean []string
+	for _, e := range emails {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if !emailRe.MatchString(e) {
+			return nil, &httpErr{code: 400, msg: "邮箱格式不对：" + e}
+		}
+		clean = append(clean, e)
+		if strings.HasPrefix(e, "@") {
+			include = append(include, map[string]any{"email_domain": map[string]string{"domain": e[1:]}})
+		} else {
+			include = append(include, map[string]any{"email": map[string]string{"email": e}})
+		}
+	}
+	if len(include) == 0 {
+		return nil, &httpErr{code: 400, msg: "至少填一个允许的邮箱"}
+	}
+	if hours <= 0 || hours > 720 {
+		hours = 24
+	}
+	acc, err := cfAccountOf(tok)
+	if err != nil {
+		return nil, err
+	}
+	var apps []cfAccessApp
+	if err := cfDo(tok, "GET", "/accounts/"+acc.ID+"/access/apps?per_page=100", nil, &apps); err != nil {
+		return nil, errors.New(accessErr(err))
+	}
+	var app, bypass *cfAccessApp
+	for i := range apps {
+		switch {
+		case strings.EqualFold(apps[i].Domain, host):
+			if !strings.HasPrefix(apps[i].Name, accessPrefix) {
+				return nil, &httpErr{code: 409, msg: host + " 已经有别人建的 Access 应用「" + apps[i].Name + "」（可能是 Berth 或你在 Cloudflare 后台建的），Wharf 不改它"}
+			}
+			app = &apps[i]
+		case strings.EqualFold(apps[i].Domain, host+accessBypassPath) && strings.HasPrefix(apps[i].Name, accessPrefix):
+			bypass = &apps[i]
+		}
+	}
+	upsert := func(cur *cfAccessApp, body map[string]any, pol map[string]any) error {
+		id := ""
+		if cur == nil {
+			var created cfAccessApp
+			if err := cfDo(tok, "POST", "/accounts/"+acc.ID+"/access/apps", body, &created); err != nil {
+				return errors.New(accessErr(err))
+			}
+			id = created.ID
+		} else {
+			id = cur.ID
+			if err := cfDo(tok, "PUT", "/accounts/"+acc.ID+"/access/apps/"+id, body, nil); err != nil {
+				return errors.New(accessErr(err))
+			}
+		}
+		var pols []struct {
+			ID string `json:"id"`
+		}
+		_ = cfDo(tok, "GET", "/accounts/"+acc.ID+"/access/apps/"+id+"/policies", nil, &pols)
+		var err error
+		if len(pols) > 0 {
+			err = cfDo(tok, "PUT", "/accounts/"+acc.ID+"/access/apps/"+id+"/policies/"+pols[0].ID, pol, nil)
+		} else {
+			err = cfDo(tok, "POST", "/accounts/"+acc.ID+"/access/apps/"+id+"/policies", pol, nil)
+		}
+		if err != nil {
+			return errors.New(accessErr(err))
+		}
+		return nil
+	}
+	// the bypass first: there is never a moment when Berth's calls are caught by the email code
+	if err := upsert(bypass, map[string]any{"name": accessPrefix + host + " · 面板接口放行", "domain": host + accessBypassPath, "type": "self_hosted",
+		"session_duration": "24h", "app_launcher_visible": false},
+		map[string]any{"name": "Berth 接口（自带签名）", "decision": "bypass", "include": []map[string]any{{"everyone": map[string]any{}}}, "precedence": 1}); err != nil {
+		return nil, err
+	}
+	if err := upsert(app, map[string]any{"name": accessPrefix + host, "domain": host, "type": "self_hosted", "session_duration": jsonHours(hours), "app_launcher_visible": false},
+		map[string]any{"name": "Wharf 允许", "decision": "allow", "include": include, "precedence": 1}); err != nil {
+		return nil, err
+	}
+	return clean, nil
+}
+
+// deleteAccess removes Wharf's Access apps for host (the protection and its bypass).
+func (a *App) deleteAccess(tok, host string) error {
+	acc, err := cfAccountOf(tok)
+	if err != nil {
+		return err
+	}
+	var apps []cfAccessApp
+	if err := cfDo(tok, "GET", "/accounts/"+acc.ID+"/access/apps?per_page=100", nil, &apps); err != nil {
+		return errors.New(accessErr(err))
+	}
+	for _, x := range apps {
+		if strings.HasPrefix(x.Name, accessPrefix) && (strings.EqualFold(x.Domain, host) || strings.EqualFold(x.Domain, host+accessBypassPath)) {
+			if err := cfDo(tok, "DELETE", "/accounts/"+acc.ID+"/access/apps/"+x.ID, nil, nil); err != nil {
+				return errors.New(accessErr(err))
+			}
+		}
+	}
+	return nil
+}
+
 // POST /api/cloudflare/access {hostname, emails, hours}: protect a name (create or update)
 func (a *App) handleCFAccessSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -334,89 +454,18 @@ func (a *App) handleCFAccessSave(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "请求格式错误")
 		return
 	}
-	host := strings.ToLower(strings.TrimSpace(req.Hostname))
-	if !fqdnRe.MatchString(host) {
-		jsonErr(w, 400, "名字不对")
-		return
-	}
-	var include []map[string]any
-	var emails []string
-	for _, e := range req.Emails {
-		e = strings.ToLower(strings.TrimSpace(e))
-		if e == "" {
-			continue
-		}
-		if !emailRe.MatchString(e) {
-			jsonErr(w, 400, "邮箱格式不对："+e)
-			return
-		}
-		emails = append(emails, e)
-		if strings.HasPrefix(e, "@") {
-			include = append(include, map[string]any{"email_domain": map[string]string{"domain": e[1:]}})
-		} else {
-			include = append(include, map[string]any{"email": map[string]string{"email": e}})
-		}
-	}
-	if len(include) == 0 {
-		jsonErr(w, 400, "至少填一个允许的邮箱")
-		return
-	}
-	if req.Hours <= 0 || req.Hours > 720 {
-		req.Hours = 24
-	}
 	tok, err := a.cfToken()
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	acc, err := cfAccountOf(tok)
+	host := strings.ToLower(strings.TrimSpace(req.Hostname))
+	emails, err := a.saveAccess(tok, host, req.Emails, req.Hours)
 	if err != nil {
-		jsonErr(w, 400, err.Error())
+		replyErr(w, err)
 		return
 	}
-	var apps []cfAccessApp
-	if err := cfDo(tok, "GET", "/accounts/"+acc.ID+"/access/apps?per_page=100", nil, &apps); err != nil {
-		jsonErr(w, 400, accessErr(err))
-		return
-	}
-	var app *cfAccessApp
-	for i := range apps {
-		if strings.EqualFold(apps[i].Domain, host) {
-			if !strings.HasPrefix(apps[i].Name, accessPrefix) {
-				jsonErr(w, 409, host+" 已经有别人建的 Access 应用「"+apps[i].Name+"」（可能是 Berth 或你在 Cloudflare 后台建的），Wharf 不改它")
-				return
-			}
-			app = &apps[i]
-		}
-	}
-	body := map[string]any{"name": accessPrefix + host, "domain": host, "type": "self_hosted", "session_duration": jsonHours(req.Hours), "app_launcher_visible": false}
-	if app == nil {
-		var created cfAccessApp
-		if err := cfDo(tok, "POST", "/accounts/"+acc.ID+"/access/apps", body, &created); err != nil {
-			jsonErr(w, 400, accessErr(err))
-			return
-		}
-		app = &created
-	} else if err := cfDo(tok, "PUT", "/accounts/"+acc.ID+"/access/apps/"+app.ID, body, nil); err != nil {
-		jsonErr(w, 400, accessErr(err))
-		return
-	}
-	// one policy, rewritten each time
-	var pols []struct {
-		ID string `json:"id"`
-	}
-	_ = cfDo(tok, "GET", "/accounts/"+acc.ID+"/access/apps/"+app.ID+"/policies", nil, &pols)
-	pol := map[string]any{"name": "Wharf 允许", "decision": "allow", "include": include, "precedence": 1}
-	if len(pols) > 0 {
-		err = cfDo(tok, "PUT", "/accounts/"+acc.ID+"/access/apps/"+app.ID+"/policies/"+pols[0].ID, pol, nil)
-	} else {
-		err = cfDo(tok, "POST", "/accounts/"+acc.ID+"/access/apps/"+app.ID+"/policies", pol, nil)
-	}
-	if err != nil {
-		jsonErr(w, 400, accessErr(err))
-		return
-	}
-	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "cloudflare.access", "access", host, "Cloudflare Access 保护 "+host+"："+strings.Join(emails, "、"), nil, map[string]any{"emails": emails, "hours": req.Hours}, false)
+	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "cloudflare.access", "access", host, "Cloudflare Access 保护 "+host+"："+strings.Join(emails, "、")+"（Berth 的面板接口放行）", nil, map[string]any{"emails": emails, "hours": req.Hours}, false)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -446,11 +495,12 @@ func (a *App) handleCFAccessDelete(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 403, "这个 Access 应用不是 Wharf 建的，请到建它的地方去改")
 		return
 	}
-	if err := cfDo(tok, "DELETE", "/accounts/"+acc.ID+"/access/apps/"+url.PathEscape(id), nil, nil); err != nil {
-		jsonErr(w, 400, accessErr(err))
+	host := strings.TrimSuffix(app.Domain, accessBypassPath)
+	if err := a.deleteAccess(tok, host); err != nil {
+		jsonErr(w, 400, err.Error())
 		return
 	}
-	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "cloudflare.access.delete", "access", app.Domain, "取消 Cloudflare Access 保护："+app.Domain, nil, nil, false)
+	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "cloudflare.access.delete", "access", host, "取消 Cloudflare Access 保护："+host, nil, nil, false)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

@@ -424,3 +424,27 @@ LuCI（uhttpd）照旧监听 443。开启「不带端口」后，Wharf 加一条
 ### 9.6 数据（迁移 v24）
 
 `berth_link.mode`（`''` = v2 地址列表）、`peer_lan`、`peer_public`、`peer_protocol`。设置：`panel.lan_host`、`panel.lan443`。路由器：uci `owp.lan443`（`enabled`、`list name`），防火墙 `owp_lan443`。
+
+## 10. 外网访问、Access 与 Passkey（Wharf 0.25.0 起）
+
+### 10.1 Cloudflare Access 不挡面板之间的接口
+
+- Wharf 给自己的名字建 Access 应用（「Wharf · <名字>」）时，同时建一个 Bypass 应用「Wharf · <名字> · 面板接口放行」，路径 `<名字>/api/ext/berth/`，策略 Bypass · Everyone。先建 Bypass、再建邮箱验证，中间不会有接口被拦的时刻；删除时两个一起删。这条路径上的请求本来就要签名（`X-Berth-Key`）。
+- Wharf 调 Berth 时，如果收到 3xx 且 `Location` 指向 `*.cloudflareaccess.com`，报「<名字> 开了 Cloudflare Access（邮箱验证），没有放行面板接口 /api/ext/wharf/」，不只说「连不上」；互联状态和切换互联方式时都这样检查。切换到公网互联之前，Wharf 先对 Berth 的公网名字发一个签名 ping，被 Access 拦住或连不上就不切换。
+- Berth 一侧请同样放行 `<Berth 名字>/api/ext/wharf/`。
+
+### 10.2 names.changed 的时机
+
+Wharf 在以下情况给 Berth 发 `POST /events {"type": "names.changed", "names": {lan, public, lan_fp}}`（名字真有变化才发）：面板的公网名字或经 443 / 面板端口的开关改了、隧道上加或删了面板的名字、内网名字改名、「不带端口」开关。
+
+### 10.3 一键经隧道开放 / 停止
+
+`POST /api/remote/tunnel {label, zone_id, access, emails}`（面板内部接口）：检查令牌权限（Zone 读、DNS 编辑、Tunnel 编辑；勾邮箱验证时还要 Access）→ 隧道（已有就共用）→ 橙色云 CNAME → 隧道路由 → Access（含 Bypass）→ names.changed。DNS 记录之后任何一步失败，已加的记录、路由、Access 都撤回。`DELETE /api/remote/tunnel?hostname=` 一次删掉 Access、路由和 DNS 记录。路由器上的 cloudflared 由界面先装好（内存不到 256 MB 时先问）。
+
+隧道的面板路由指向本机 unix 套接字（只有 cloudflared 能打开），不是 127.0.0.1 端口：经隧道来的请求靠这个套接字认出来，`CF-Connecting-IP` 只在这种连接上被采信，访问控制、访问记录、限速都用真实访客 IP。访客看到的证书由 Cloudflare 边缘提供，路由器不需要为隧道名字申请证书。
+
+### 10.4 Passkey 跟着名字走
+
+- 账号是「只用 Passkey」或「密码 + Passkey」、而当前名字上没有它的 Passkey 时，密码正确后返回 403，说明 Passkey 在哪个名字上、怎么在这个名字上添加（不再和密码错误一样只说「登录失败」，也不再弹出完成不了的第二步）。
+- 「密码或 Passkey」的账号照常用密码登录；登录后页面顶部提示「<名字> 上还没有你的 Passkey」，可以当场添加。
+- 一次性跳转：`POST /api/me/hop {to, path}` → `{url: "https://<名字>/hop/<t>"}`，60 秒、只能用一次、只能跳到面板自己的名字；`GET /hop/{t}` 在目标名字上建立登录并转到 `path`（例如 `/account?passkey=add`）。

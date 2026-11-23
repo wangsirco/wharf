@@ -113,6 +113,9 @@ func (a *App) measureBerth(l *berthLink) *berthConn {
 		d := time.Since(t0)
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		resp.Body.Close()
+		if accessRedirect(resp) {
+			return d, resp.Header, errors.New(accessBlockedMsg(urlHost(base)))
+		}
 		if resp.StatusCode >= 300 {
 			return d, resp.Header, fmt.Errorf("Berth 返回 %d", resp.StatusCode)
 		}

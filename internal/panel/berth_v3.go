@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -99,10 +100,24 @@ func (a *App) refreshPeer(l *berthLink, force bool) {
 	}
 }
 
-// berthNotifyNames: Wharf's names changed — Berth reads them again after link.updated.
+// berthNotifyNames: Wharf's names may have changed (LAN name, 443, public names, tunnel) —
+// Berth reads GET /names again on names.changed. Only sent when they really changed.
+var lastNamesSent struct {
+	sync.Mutex
+	v panelNames
+}
+
 func (a *App) berthNotifyNames() {
+	n := a.wharfNames()
+	lastNamesSent.Lock()
+	same := lastNamesSent.v == n
+	lastNamesSent.v = n
+	lastNamesSent.Unlock()
+	if same {
+		return
+	}
 	if l := a.berth(); l != nil {
-		a.berthNotify("link.updated", map[string]any{"scopes": l.Scopes, "targets": l.Targets, "names": a.wharfNames()})
+		a.berthNotify("names.changed", map[string]any{"names": n})
 	}
 }
 
@@ -134,6 +149,11 @@ func (a *App) handleBerthMode(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "Wharf 还没有公网名字：先在「外网访问」里设置")
 		return
 	}
+	target := map[string]string{"lan": l.PeerLAN, "public": l.PeerPub}[req.Mode]
+	if err := a.checkPeerURL(l, target); err != nil {
+		jsonErr(w, 400, "没有切换："+err.Error())
+		return
+	}
 	before := l.Mode
 	if _, err := a.db.Exec(`UPDATE berth_link SET mode=?, last_error='' WHERE id=?`, req.Mode, l.ID); err != nil {
 		jsonErr(w, 500, err.Error())
@@ -163,6 +183,9 @@ func stepErr(base string, err error) string {
 	var op *net.OpError
 	var cert x509.UnknownAuthorityError
 	var host509 x509.HostnameError
+	if strings.Contains(err.Error(), "Cloudflare Access") {
+		return err.Error()
+	}
 	switch {
 	case errors.As(err, &dns):
 		return "解析不到 " + urlHost(base) + "（这台路由器查不到这个名字）"
@@ -345,4 +368,37 @@ func (a *App) handleBerthStatsSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	statsCache.at, statsCache.v = time.Now(), out
 	writeJSON(w, 200, out)
+}
+
+// accessRedirect: Cloudflare Access caught the call and sends it to its sign-in page.
+func accessRedirect(resp *http.Response) bool {
+	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(resp.Header.Get("Location")), "cloudflareaccess.com")
+}
+
+func accessBlockedMsg(host string) string {
+	return host + " 开了 Cloudflare Access（邮箱验证），没有放行面板接口 /api/ext/wharf/：请在 Berth 里给这条路径加放行（Bypass），或改用内网互联"
+}
+
+// checkPeerURL: one signed ping to a name before the link switches to it, so a name
+// behind Cloudflare Access (or not reachable at all) is caught before, not after.
+func (a *App) checkPeerURL(l *berthLink, base string) error {
+	req, err := berthRequest(context.Background(), l, base, "GET", "/ping", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := pinnedClient(l.CertFP, 10*time.Second).Do(req)
+	if err != nil {
+		return errors.New(stepErr(base, err))
+	}
+	defer resp.Body.Close()
+	if accessRedirect(resp) {
+		return errors.New(accessBlockedMsg(urlHost(base)))
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("%s 返回 %d", urlHost(base), resp.StatusCode)
+	}
+	return nil
 }

@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/brand-mark'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { MobileBar } from '@/components/mobile-bar'
+import { PasskeyHereBanner } from '@/components/passkey-here'
 import { CommandPalette } from '@/components/command'
 import { ModeSwitch, useMode } from '@/lib/mode'
 import { Button } from '@/components/ui/button'
@@ -192,6 +193,7 @@ export function Layout() {
           <UserMenu />
         </header>
         <NetBanner />
+        <PasskeyHereBanner />
         <main className="min-w-0 flex-1 p-3 pb-20 sm:p-4 sm:pb-20 md:p-6">
           <div className="flex gap-8">
             <div className="min-w-0 flex-1"><TocBar /><ErrorBoundary key={loc.pathname}><Outlet /></ErrorBoundary></div>

@@ -476,6 +476,11 @@ func (a *App) berthCall(l *berthLink, method, path string, body, out any) error 
 		}
 		_ = json.Unmarshal(b, &e)
 		msg := firstNonEmpty(e.Error, fmt.Sprintf("Berth 返回 %d", resp.StatusCode))
+		if accessRedirect(resp) {
+			msg = accessBlockedMsg(urlHost(resp.Request.URL.String()))
+			a.berthNoteError(l, msg)
+			return &berthHTTPError{resp.StatusCode, msg}
+		}
 		if resp.StatusCode == 401 {
 			_, _ = a.db.Exec(`UPDATE berth_link SET status='invalid', last_error=? WHERE id=?`, "Berth 不再接受 Wharf 的令牌："+msg, l.ID)
 		}

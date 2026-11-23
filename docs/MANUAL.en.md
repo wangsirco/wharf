@@ -624,7 +624,7 @@ New scope *local names*: Berth may register its own names in the router's DNS (e
 
 ### 6.24 Remote access
 
-*Management → Remote access* gathers opening the panel from outside: one line on how it is reachable now (which names, which way, which regions), the three ways (Cloudflare Tunnel / orange cloud / direct) with the one that suits the line according to the public address check, the panel's names (moved here from Settings), and who may come in (access control and Cloudflare Access).
+*Management → Remote access*: how the panel is reachable now and what the public address check says (e.g. a carrier-grade NAT address on the WAN); four ways — direct, Cloudflare Tunnel, Tailscale, LAN only — the one that suits the line marked; the chosen one's steps right below. The Cloudflare tunnel is done in this card: connect a token in a dialog (permissions listed), see exactly which permission is missing, pick a name and whether to require an email code (recommended), and one button installs cloudflared, creates the tunnel, DNS record, route and Access app — undone if any step fails; *Stop* removes it all. Names protected by Access let Berth's signed calls through. After a name is opened, the page offers to add a passkey there, carrying the sign-in over with a one-time link (60 s, once). Signing in with a passkey-only or password + passkey account on a name without its passkey now says where its passkey is and how to add one here; password accounts sign in and are offered to add one.
 
 ### 6.25 Undo
 

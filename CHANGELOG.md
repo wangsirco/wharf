@@ -6,6 +6,10 @@
 - Settings → Access addresses (LAN / public / fallback, certificate steps per system) and a wizard step, on by default · 「访问地址」卡片和向导一步
 - Berth v3 (docs/BERTH.md §9): names endpoint, LAN or public link chosen at pairing and switchable without pairing again (no silent switching, errors by step), single sign-on to the right name with a chooser when unsure, read-only statistics for Berth's overview (scope stats), visitor log filters by country and period · Berth v3：名字、内网 / 公网互联、打开时判断在家在外、统计给 Berth
 - Pages take filters from the address (/visitors?cc=, /world?range=, /dns?range=, /traffic?range=, /devices?q=) · 页面支持地址里的筛选参数
+- Remote access: four ways (direct, Cloudflare Tunnel, Tailscale, LAN only) with the line's verdict; the tunnel from token to open in one card, one button, undone on failure, stopped in one step · 外网访问四种方式，隧道在卡片里一键开放 / 停止
+- Cloudflare Access on Wharf's names lets Berth's signed calls through (Bypass on /api/ext/berth/); Access in front of Berth is reported as such · Access 放行面板接口，被 Access 拦时说清楚
+- Passkeys follow names: clear message instead of a dead end when an account's passkey is on another name, a banner to add one here, a one-time link to carry the sign-in to another name · Passkey 跟着名字走
+- Fixes: a resource leak behind the LAN 443 splitter took the panel's names down (keep-alive connections never closed); listeners no longer stop on accept errors; timeouts on every server; bounded login limiter; time limits on opkg · 修复 443 分流背后的连接泄漏等
 
 ## 0.24.0 — Berth pairing v2, verdict line, settings tabs, phones · Berth 互联 v2、一句话结论、设置分类、手机
 

@@ -17,8 +17,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-interface CFState { connected: boolean; token: string; create_url: string; zones: { id: string; name: string }[]; error?: string }
-interface Caps {
+export interface CFState { connected: boolean; token: string; create_url: string; zones: { id: string; name: string }[]; error?: string }
+export interface Caps {
   account?: { id: string; name: string }; zones: boolean; dns: boolean; tunnel: boolean; access: 'ok' | 'denied' | 'not_enabled'
   settings: boolean; analytics: boolean; errors?: Record<string, string>; checked: number
 }
@@ -110,7 +110,7 @@ function Welcome({ createUrl, onDone }: { createUrl: string; onDone: () => void 
   )
 }
 
-function TokenSteps({ createUrl, onDone, replace }: { createUrl: string; onDone: () => void; replace?: boolean }) {
+export function TokenSteps({ createUrl, onDone, replace }: { createUrl: string; onDone: () => void; replace?: boolean }) {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const save = async () => {

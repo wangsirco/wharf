@@ -276,6 +276,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/v1/net") || strings.HasPrefix(r.URL.Path, "/v1/plugins") || strings.HasPrefix(r.URL.Path, "/v1/luci/") ||
 		strings.HasPrefix(r.URL.Path, "/v1/store") || r.URL.Path == "/v1/uci/guarded" || r.URL.Path == "/v1/uci/confirm" || r.URL.Path == "/v1/uci/rollback":
 		s.netAPI(w, r, body)
+	case r.Method == "GET" && r.URL.Path == "/v1/tailscale":
+		writeJSON(w, 200, GetTailscale())
 	case r.Method == "GET" && r.URL.Path == "/v1/lan443":
 		writeJSON(w, 200, GetLAN443())
 	case r.Method == "POST" && r.URL.Path == "/v1/lan443":

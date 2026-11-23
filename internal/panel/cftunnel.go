@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -275,10 +276,20 @@ func (a *App) handleTunnel(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleTunnelRouter(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string `json:"action"`
+		Force  bool   `json:"force"` // install on a router with little memory anyway
 	}
 	if readJSON(r, &req) != nil {
 		jsonErr(w, 400, "请求格式错误")
 		return
+	}
+	if req.Action == "install" && !req.Force {
+		var sys struct {
+			MemTotal uint64 `json:"mem_total"`
+		}
+		if a.agent.Do("GET", "/v1/system", nil, &sys) == nil && sys.MemTotal > 0 && sys.MemTotal < 256<<20 {
+			writeJSON(w, 400, map[string]any{"error": fmt.Sprintf("这台路由器只有 %d MB 内存，cloudflared 常驻要 30–50 MB，可能拖慢路由器。确定要装吗？", sys.MemTotal>>20), "mem_low": true})
+			return
+		}
 	}
 	if req.Action == "uninstall" && len(a.tunnelConf().Routes) > 0 {
 		jsonErr(w, 400, "隧道上还有公开的名字，请先删掉它们")
@@ -299,6 +310,100 @@ func (a *App) handleTunnelRouter(w http.ResponseWriter, r *http.Request) {
 
 var fqdnRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 
+type httpErr struct {
+	code     int
+	msg      string
+	conflict bool
+}
+
+func (e *httpErr) Error() string { return e.msg }
+
+func replyErr(w http.ResponseWriter, err error) {
+	var he *httpErr
+	if errors.As(err, &he) {
+		if he.conflict {
+			writeJSON(w, he.code, map[string]any{"error": he.msg, "conflict": true})
+			return
+		}
+		jsonErr(w, he.code, he.msg)
+		return
+	}
+	jsonErr(w, 400, err.Error())
+}
+
+// addTunnelRoute puts a name on the tunnel: the tunnel itself if needed, a proxied CNAME
+// to it, the route in the tunnel's configuration. Nothing is left half done: a failure
+// after the DNS record removes the record again.
+func (a *App) addTunnelRoute(tok string, rt tunnelRoute, replace bool) (tunnelConf, tunnelRoute, error) {
+	rt.Hostname = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(rt.Hostname)), ".")
+	if !fqdnRe.MatchString(rt.Hostname) {
+		return tunnelConf{}, rt, &httpErr{code: 400, msg: "名字不对，例如 wharf.example.com"}
+	}
+	switch rt.Kind {
+	case "panel":
+		rt.Service, rt.NoVerify = "", false
+	case "lan":
+		u, err := url.Parse(strings.TrimSpace(rt.Service))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || (u.Path != "" && u.Path != "/") {
+			return tunnelConf{}, rt, &httpErr{code: 400, msg: "服务地址写成 http://192.168.1.10:8080 这样"}
+		}
+		ip := net.ParseIP(u.Hostname())
+		if ip == nil || !(ip.IsPrivate() || ip.IsLoopback()) {
+			return tunnelConf{}, rt, &httpErr{code: 400, msg: "只能是家里的地址（内网 IP）"}
+		}
+		rt.Service = u.Scheme + "://" + u.Host
+	default:
+		return tunnelConf{}, rt, &httpErr{code: 400, msg: "请选择要公开什么"}
+	}
+	tunnelMu.Lock()
+	defer tunnelMu.Unlock()
+	c := a.tunnelConf()
+	for _, x := range c.Routes {
+		if x.Hostname == rt.Hostname {
+			return c, rt, &httpErr{code: 409, msg: rt.Hostname + " 已经在隧道上了"}
+		}
+	}
+	if slicesContains(a.publicNames(), rt.Hostname) {
+		return c, rt, &httpErr{code: 409, msg: rt.Hostname + " 已经是面板的公网域名（橙色云 / 直连），一个名字只能走一种方式"}
+	}
+	zoneID, err := cfZone(cfCall(tok), rt.Hostname)
+	if err != nil {
+		return c, rt, err
+	}
+	var st struct {
+		Installed bool `json:"installed"`
+	}
+	if err := a.agent.Do("GET", "/v1/tunnel", nil, &st); err != nil || !st.Installed {
+		return c, rt, &httpErr{code: 400, msg: "路由器上还没有装 cloudflared，先点「安装」"}
+	}
+	if err := a.ensureTunnel(tok, &c); err != nil {
+		return c, rt, err
+	}
+	rec, err := pointToTunnel(tok, zoneID, rt.Hostname, c.ID, replace)
+	if err != nil {
+		var ce *conflictErr
+		if errors.As(err, &ce) {
+			return c, rt, &httpErr{code: 409, msg: ce.msg, conflict: true}
+		}
+		return c, rt, err
+	}
+	rt.ZoneID, rt.RecordID, rt.Created = zoneID, rec, time.Now().Unix()
+	c.Routes = append(c.Routes, rt)
+	if err := a.pushTunnelConfig(tok, c); err != nil {
+		if rec != "" {
+			_ = cfDo(tok, "DELETE", "/zones/"+zoneID+"/dns_records/"+rec, nil, nil)
+		}
+		return c, rt, err
+	}
+	if err := a.saveTunnelConf(c); err != nil {
+		return c, rt, err
+	}
+	if rt.Kind == "panel" {
+		go a.berthNotifyNames()
+	}
+	return c, rt, nil
+}
+
 // POST /api/cloudflare/tunnel/routes {hostname, kind, service, no_verify, replace}
 func (a *App) handleTunnelRouteAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -309,83 +414,14 @@ func (a *App) handleTunnelRouteAdd(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "请求格式错误")
 		return
 	}
-	rt := req.tunnelRoute
-	rt.Hostname = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(rt.Hostname)), ".")
-	if !fqdnRe.MatchString(rt.Hostname) {
-		jsonErr(w, 400, "名字不对，例如 wharf.example.com")
-		return
-	}
-	switch rt.Kind {
-	case "panel":
-		rt.Service, rt.NoVerify = "", false
-	case "lan":
-		u, err := url.Parse(strings.TrimSpace(rt.Service))
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || (u.Path != "" && u.Path != "/") {
-			jsonErr(w, 400, "服务地址写成 http://192.168.1.10:8080 这样")
-			return
-		}
-		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !(ip.IsPrivate() || ip.IsLoopback()) {
-			jsonErr(w, 400, "只能是家里的地址（内网 IP）")
-			return
-		}
-		rt.Service = u.Scheme + "://" + u.Host
-	default:
-		jsonErr(w, 400, "请选择要公开什么")
-		return
-	}
 	tok, err := a.cfToken()
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	tunnelMu.Lock()
-	defer tunnelMu.Unlock()
-	c := a.tunnelConf()
-	for _, x := range c.Routes {
-		if x.Hostname == rt.Hostname {
-			jsonErr(w, 409, rt.Hostname+" 已经在隧道上了")
-			return
-		}
-	}
-	if slicesContains(a.publicNames(), rt.Hostname) {
-		jsonErr(w, 409, rt.Hostname+" 已经是面板的公网域名（橙色云 / 直连），一个名字只能走一种方式")
-		return
-	}
-	zoneID, err := cfZone(cfCall(tok), rt.Hostname)
+	c, rt, err := a.addTunnelRoute(tok, req.tunnelRoute, req.Replace)
 	if err != nil {
-		jsonErr(w, 400, err.Error())
-		return
-	}
-	var st struct {
-		Installed bool `json:"installed"`
-	}
-	if err := a.agent.Do("GET", "/v1/tunnel", nil, &st); err != nil || !st.Installed {
-		jsonErr(w, 400, "路由器上还没有装 cloudflared，先点「安装」")
-		return
-	}
-	if err := a.ensureTunnel(tok, &c); err != nil {
-		jsonErr(w, 400, err.Error())
-		return
-	}
-	rec, err := pointToTunnel(tok, zoneID, rt.Hostname, c.ID, req.Replace)
-	if err != nil {
-		var ce *conflictErr
-		if errors.As(err, &ce) {
-			writeJSON(w, 409, map[string]any{"error": ce.msg, "conflict": true})
-			return
-		}
-		jsonErr(w, 400, err.Error())
-		return
-	}
-	rt.ZoneID, rt.RecordID, rt.Created = zoneID, rec, time.Now().Unix()
-	c.Routes = append(c.Routes, rt)
-	if err := a.pushTunnelConfig(tok, c); err != nil {
-		jsonErr(w, 400, err.Error())
-		return
-	}
-	if err := a.saveTunnelConf(c); err != nil {
-		jsonErr(w, 500, err.Error())
+		replyErr(w, err)
 		return
 	}
 	what := "经 Cloudflare 隧道公开面板：" + rt.Hostname
@@ -396,18 +432,12 @@ func (a *App) handleTunnelRouteAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "conf": c})
 }
 
-// DELETE /api/cloudflare/tunnel/routes?hostname=
-func (a *App) handleTunnelRouteDelete(w http.ResponseWriter, r *http.Request) {
-	host := r.URL.Query().Get("hostname")
-	tok, err := a.cfToken()
-	if err != nil {
-		jsonErr(w, 400, err.Error())
-		return
-	}
+// removeTunnelRoute takes a name off the tunnel and deletes its DNS record.
+func (a *App) removeTunnelRoute(tok, host string) (*tunnelRoute, tunnelConf, error) {
 	tunnelMu.Lock()
 	defer tunnelMu.Unlock()
 	c := a.tunnelConf()
-	var keep []tunnelRoute
+	keep := []tunnelRoute{}
 	var gone *tunnelRoute
 	for i := range c.Routes {
 		if c.Routes[i].Hostname == host {
@@ -417,20 +447,11 @@ func (a *App) handleTunnelRouteDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if gone == nil {
-		jsonErr(w, 404, "隧道上没有这个名字")
-		return
-	}
-	if gone.Kind == "panel" && fromTunnel(r) && strings.EqualFold(hostOnly(r.Host), host) {
-		jsonErr(w, 400, "你正是通过这个名字打开的面板，删掉就进不来了。请换一个地址打开后再删")
-		return
-	}
-	if keep == nil {
-		keep = []tunnelRoute{}
+		return nil, c, &httpErr{code: 404, msg: "隧道上没有这个名字"}
 	}
 	c.Routes = keep
 	if err := a.pushTunnelConfig(tok, c); err != nil {
-		jsonErr(w, 400, err.Error())
-		return
+		return gone, c, err
 	}
 	if gone.RecordID != "" {
 		if err := cfDo(tok, "DELETE", "/zones/"+gone.ZoneID+"/dns_records/"+gone.RecordID, nil, nil); err != nil && !strings.Contains(err.Error(), "81044") {
@@ -438,6 +459,29 @@ func (a *App) handleTunnelRouteDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = a.saveTunnelConf(c)
+	if gone.Kind == "panel" {
+		go a.berthNotifyNames()
+	}
+	return gone, c, nil
+}
+
+// DELETE /api/cloudflare/tunnel/routes?hostname=
+func (a *App) handleTunnelRouteDelete(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("hostname")
+	tok, err := a.cfToken()
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	if fromTunnel(r) && strings.EqualFold(hostOnly(r.Host), host) {
+		jsonErr(w, 400, "你正是通过这个名字打开的面板，删掉就进不来了。请换一个地址打开后再删")
+		return
+	}
+	gone, c, err := a.removeTunnelRoute(tok, host)
+	if err != nil {
+		replyErr(w, err)
+		return
+	}
 	a.audit(actor{user: currentUser(r), ip: a.clientIP(r)}, "tunnel.route.delete", "tunnel", host, "从 Cloudflare 隧道撤下 "+host, gone, nil, false)
 	writeJSON(w, 200, map[string]any{"ok": true, "conf": c})
 }

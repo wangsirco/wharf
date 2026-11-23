@@ -69,7 +69,7 @@ func (a *App) beginSecondStep(w http.ResponseWriter, r *http.Request, u *User) {
 		creds = a.passkeyCreds(u.ID, rp)
 	}
 	if len(creds) == 0 {
-		jsonErr(w, 403, "这个账号还要验证 Passkey，但这个地址上没有它的 Passkey；请从 "+strings.Join(a.usablePasskeyHosts(u.ID), " 或 ")+" 打开面板")
+		jsonErr(w, 403, a.passkeyHereMsg(u, hostOnly(r.Host)))
 		return
 	}
 	assertion, data, err := wa.BeginLogin(&pkUser{u: u, creds: creds})

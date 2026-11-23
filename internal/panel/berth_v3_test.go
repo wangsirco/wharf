@@ -34,7 +34,7 @@ func TestBerthV3NamesAndMode(t *testing.T) {
 		case "/api/ext/wharf/v1/ping":
 			_, _ = w.Write([]byte(`{"ok":true,"protocol":3}`))
 		case "/api/ext/wharf/v1/names":
-			_, _ = w.Write([]byte(`{"lan":"` + "https://" + r.Host + `","public":"https://mini.example.com"}`))
+			_, _ = w.Write([]byte(`{"lan":"` + "https://" + r.Host + `","public":"https://` + strings.Replace(r.Host, "127.0.0.1", "localhost", 1) + `"}`))
 		case "/api/ext/wharf/v1/events":
 			mu.Lock()
 			events = append(events, string(body))
@@ -49,7 +49,8 @@ func TestBerthV3NamesAndMode(t *testing.T) {
 	l := a.berth()
 	a.refreshPeer(l, true)
 	l = a.berth()
-	if l.PeerProto != 3 || l.PeerLAN != srv.URL || l.PeerPub != "https://mini.example.com" || l.Mode != "lan" {
+	pub := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	if l.PeerProto != 3 || l.PeerLAN != srv.URL || l.PeerPub != pub || l.Mode != "lan" {
 		t.Fatalf("peer %+v", l)
 	}
 	if c := l.candidates(); len(c) != 1 || c[0] != srv.URL {
@@ -69,7 +70,7 @@ func TestBerthV3NamesAndMode(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("mode: %d %s", w.Code, w.Body)
 	}
-	if c := a.berth().candidates(); len(c) != 1 || c[0] != "https://mini.example.com" {
+	if c := a.berth().candidates(); len(c) != 1 || c[0] != pub {
 		t.Fatalf("public candidates %v", c)
 	}
 	// (link.mode then goes to Berth's public name — unreachable here, as it should be)
@@ -136,5 +137,72 @@ func TestLimiterForgets(t *testing.T) {
 	}
 	if n := len(l.fail); n > 2001 {
 		t.Fatalf("%d keys kept", n)
+	}
+}
+
+// Berth's public name behind Cloudflare Access: the switch is refused with the reason.
+func TestBerthAccessDetected(t *testing.T) {
+	a, _, su := berthApp(t)
+	pair(t, a, su, allScopes)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://team.cloudflareaccess.com/cdn-cgi/access/login/x", http.StatusFound)
+	}))
+	defer srv.Close()
+	h := sha256.Sum256(srv.Certificate().Raw)
+	_, _ = a.db.Exec(`UPDATE berth_link SET cert_fp=?`, hex.EncodeToString(h[:]))
+	err := a.checkPeerURL(a.berth(), srv.URL)
+	if err == nil || !strings.Contains(err.Error(), "Cloudflare Access") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A passkey-only account whose passkey is on another name is told why, not "wrong password".
+func TestPasskeyOnOtherName(t *testing.T) {
+	a, _, su := berthApp(t)
+	_, _ = a.db.Exec(`UPDATE users SET login_mode='passkey' WHERE id=?`, su.ID)
+	_, _ = a.db.Exec(`INSERT INTO passkeys(user_id, name, rp_id, cred_id, cred, created) VALUES(?,?,?,?,?,?)`, su.ID, "mac", a.localPanelName(), "x", "{}", 1)
+	body := strings.NewReader(`{"username":"root","password":"correct-horse"}`)
+	r := httptest.NewRequest("POST", "https://wharf.example.com/api/login", body)
+	r.Host = "wharf.example.com"
+	w := httptest.NewRecorder()
+	a.handleLogin(w, r)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "跟着名字走") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+// The one-time link opens only the panel's own name, once.
+func TestHop(t *testing.T) {
+	a, _, su := berthApp(t)
+	_ = a.setSetting("panel.public_names", `["wharf.example.com"]`)
+	_ = a.setSetting("panel.via_443", "1")
+	do := func(to string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		a.handleHop(w, asUser(httptest.NewRequest("POST", "/", strings.NewReader(`{"to":"`+to+`","path":"/account?passkey=add"}`)), su))
+		return w
+	}
+	if w := do("evil.example.net"); w.Code != 400 {
+		t.Fatalf("foreign host: %d", w.Code)
+	}
+	w := do("wharf.example.com")
+	var out struct{ URL string }
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !strings.HasPrefix(out.URL, "https://wharf.example.com/hop/") {
+		t.Fatalf("url %s", out.URL)
+	}
+	tk := strings.TrimPrefix(out.URL, "https://wharf.example.com/hop/")
+	in := func(host string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/hop/"+tk, nil)
+		r.Host = host
+		r.SetPathValue("t", tk)
+		w := httptest.NewRecorder()
+		a.handleHopIn(w, r)
+		return w
+	}
+	if w := in("wharf.example.com"); w.Code != 200 || !strings.Contains(w.Body.String(), "/account?passkey=add") || len(w.Result().Cookies()) == 0 {
+		t.Fatalf("hop in: %d %s", w.Code, w.Body)
+	}
+	if w := in("wharf.example.com"); w.Code != 401 {
+		t.Fatalf("second use: %d", w.Code)
 	}
 }

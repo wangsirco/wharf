@@ -168,6 +168,11 @@ func (a *App) Routes() http.Handler {
 	m.HandleFunc("POST /api/cloudflare/tunnel/routes", a.super(a.handleTunnelRouteAdd))
 	m.HandleFunc("DELETE /api/cloudflare/tunnel/routes", a.super(a.handleTunnelRouteDelete))
 	m.HandleFunc("GET /api/panel/primary", a.handlePanelPrimary)
+	m.HandleFunc("POST /api/me/hop", a.auth("", a.handleHop))
+	m.HandleFunc("GET /hop/{t}", a.handleHopIn)
+	m.HandleFunc("POST /api/remote/tunnel", a.super(a.handleRemoteTunnelOpen))
+	m.HandleFunc("DELETE /api/remote/tunnel", a.super(a.handleRemoteTunnelClose))
+	m.HandleFunc("GET /api/remote/tailscale", a.super(a.handleRemoteTailscale))
 	m.HandleFunc("GET /api/panel/access", a.super(a.handlePanelAccess))
 	m.HandleFunc("PUT /api/panel/access", a.super(a.handlePanelAccessSave))
 	m.HandleFunc("GET /api/panel/names", a.super(a.handlePanelNames))
@@ -383,6 +388,12 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	switch a.effectiveLoginMode(u) {
 	case LoginPasskey:
+		// the passkey is on another of the panel's names: say so (the password was right,
+		// so this tells a stranger nothing) instead of a dead end
+		if _, rp, err := a.rpFor(r); err != nil || len(a.passkeyCreds(u.ID, rp)) == 0 {
+			jsonErr(w, 403, a.passkeyHereMsg(u, hostOnly(r.Host)))
+			return
+		}
 		// the same answer as a wrong password: a stranger learns nothing about this account
 		a.limiter.record(keys...)
 		jsonErr(w, 401, errBadLogin)
